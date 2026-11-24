@@ -1,1 +1,67 @@
+name: Build Seven (Windows)
 
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  # The patch file in this repo's root. Change only if you rename it.
+  PATCH: seven.patch
+  # BitChord PC at the commit the patch was written against.
+  BITCHORD_REPO: jackychan4891/BitChord-PC-Official
+  BITCHORD_REF: 7ed3e48450d8c51b76c1b429855079e515a4e723
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Disable CRLF conversion
+        run: git config --global core.autocrlf false
+
+      # This repository (whatever it is called): holds the patch.
+      - uses: actions/checkout@v5
+        with:
+          path: mine
+
+      # BitChord PC, untouched.
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ env.BITCHORD_REPO }}
+          ref: ${{ env.BITCHORD_REF }}
+          path: src
+
+      - name: Apply patch
+        shell: bash
+        run: |
+          cd src
+          git apply --whitespace=nowarn ../mine/${{ env.PATCH }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+
+      - name: Build
+        working-directory: src
+        run: cargo build --release --locked
+
+      # webview2-com-sys extracts WebView2Loader.dll into its build OUT_DIR, not next to
+      # the exe. Seven.exe needs it beside it.
+      - name: Stage Seven
+        working-directory: src
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ..\dist | Out-Null
+          Copy-Item target\release\bitchord.exe ..\dist\Seven.exe -Force
+          $dll = Get-ChildItem -Path "target\release\build\*\out\x64\WebView2Loader.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dll) { $dll = Get-ChildItem -Path "$HOME\.cargo\registry\src\*\webview2-com-sys-*\x64\WebView2Loader.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          if (-not $dll) { Write-Error "WebView2Loader.dll (x64) not found"; exit 1 }
+          Copy-Item $dll.FullName ..\dist\WebView2Loader.dll -Force
+          Get-ChildItem ..\dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Seven-windows
+          path: dist/*
+          if-no-files-found: error
