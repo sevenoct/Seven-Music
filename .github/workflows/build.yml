@@ -1,4 +1,4 @@
-name: Build Seven (Windows Portable)
+name: Build Seven (Windows)
 
 on:
   push:
@@ -58,15 +58,6 @@ jobs:
           if (-not $dll) { $dll = Get-ChildItem -Path "$HOME\.cargo\registry\src\*\webview2-com-sys-*\x64\WebView2Loader.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 }
           if (-not $dll) { Write-Error "WebView2Loader.dll (x64) not found"; exit 1 }
           Copy-Item $dll.FullName ..\dist\WebView2Loader.dll -Force
-          @'
-          Seven is a native Windows desktop application (not a website or browser shortcut).
-          Run Seven.exe directly; keep WebView2Loader.dll beside it.
-
-          Microsoft Edge WebView2 Runtime is used only for embedded sign-in windows.
-          It is present on most modern Windows 10/11 systems. If it is missing, install
-          the Microsoft Edge WebView2 Evergreen Runtime before using Google/Spotify sign-in.
-          '@ | Set-Content ..\dist\README.txt -Encoding UTF8
-          Compress-Archive -Path ..\dist\Seven.exe, ..\dist\WebView2Loader.dll, ..\dist\README.txt -DestinationPath ..\dist\Seven-Portable.zip -Force
           Get-ChildItem ..\dist
 
       - uses: actions/upload-artifact@v4
