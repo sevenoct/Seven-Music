@@ -2180,7 +2180,7 @@ index bc4220d6..6b2305fa 100644
      Ok((builder.build()?, toggle))
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
-index 00000000..325994c3
+index 00000000..edfc344b
 --- /dev/null
 +++ b/src/ui/fx.rs
 @@ -0,0 +1,303 @@
@@ -2418,18 +2418,18 @@ index 00000000..325994c3
 +    (h, m, weekday, d, mo)
 +}
 +
-+/// "Selamat pagi / siang / sore / malam" for the hour.
++/// "Good morning / afternoon / evening / night" for the hour.
 +pub fn greeting(hour: u32) -> &'static str {
 +    match hour {
-+        4..=10 => "Selamat pagi",
-+        11..=14 => "Selamat siang",
-+        15..=17 => "Selamat sore",
-+        _ => "Selamat malam",
++        5..=11 => "Good morning",
++        12..=16 => "Good afternoon",
++        17..=21 => "Good evening",
++        _ => "Good night",
 +    }
 +}
 +
-+pub const DAYS: [&str; 7] = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-+pub const MONTHS: [&str; 12] = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
++pub const DAYS: [&str; 7] = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
++pub const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 +
 +/// Used when no account has a name to greet.
 +pub const DEFAULT_NAME: &str = "Hasan";
@@ -2580,10 +2580,10 @@ index 288ad8c7..4696a38d 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 00000000..3150d19f
+index 00000000..91bdd178
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,437 @@
+@@ -0,0 +1,454 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! One wide card at the top of Home. It stands on a heavily softened copy of the cover
@@ -2608,6 +2608,8 @@ index 00000000..3150d19f
 +const MAX_SLIDES: usize = 7;
 +/// The greeting above the card.
 +const GREET_H: f32 = 80.0;
++/// Size of the picture the blurred ground is made from: tiny on purpose (it was 32).
++const SOFT_PX: u32 = 8;
 +
 +#[derive(Clone)]
 +enum Go {
@@ -2715,8 +2717,21 @@ index 00000000..3150d19f
 +/// it is blown up; the small source and the GPU's filtering do the blurring.
 +fn soft_cover(ui: &Ui, card: Rect, thumbs: &[Thumb]) {
 +    let Some(t) = thumbs.last() else { return };
-+    let url = crate::model::sized_square(&t.url, 32);
-+    widgets::paint_remote(ui, &url, card, RADIUS, t.square_uv(), Color32::from_gray(185));
++    let url = crate::model::sized_square(&t.url, SOFT_PX);
++    let uv = t.square_uv();
++    let tint = Color32::from_gray(185);
++    // The first copy also carries the loading shimmer and the fade-in.
++    widgets::paint_remote(ui, &url, card, RADIUS, uv, tint);
++    let Ok(egui::load::TexturePoll::Ready { texture }) = egui::Image::new(url.as_str()).load_for_size(ui.ctx(), card.size()) else { return };
++    // Then eight more, each nudged a few percent of the picture to one side and laid on
++    // at 1/2, 1/3, 1/4...: together an even average, a true blur, so the little source's
++    // blocky steps and the stretch's diamonds are smoothed away.
++    const R: f32 = 0.05;
++    const TAPS: [(f32, f32); 8] = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (0.7, 0.7), (-0.7, 0.7), (0.7, -0.7), (-0.7, -0.7)];
++    for (i, (dx, dy)) in TAPS.iter().enumerate() {
++        let shifted = uv.translate(vec2(dx * R * uv.width(), dy * R * uv.height()));
++        egui::Image::from_texture(texture).uv(shifted).corner_radius(egui::CornerRadius::same(RADIUS as u8)).tint(tint.gamma_multiply(1.0 / (i as f32 + 2.0))).paint_at(ui, card);
++    }
 +}
 +
 +/// One slide at `alpha`, its words drifted down by `dy` (they rise into place as it arrives).
@@ -2820,6 +2835,7 @@ index 00000000..3150d19f
 +        if swallow {
 +            ctx.input_mut(|i| {
 +                i.smooth_scroll_delta = egui::Vec2::ZERO;
++                i.raw_scroll_delta = egui::Vec2::ZERO;
 +            });
 +        }
 +        ctx.data_mut(|d| d.insert_temp(sid, (acc, seen, stepped)));
@@ -2868,7 +2884,7 @@ index 00000000..3150d19f
 +    // the window, glided from one slide's to the next, ending on the page's own ground.
 +    let ground = shell::page_ground(app);
 +    let screen = ctx.content_rect();
-+    let found = slides[idx].thumbs.last().and_then(|t| fx::cover_tint(&ctx, &crate::model::sized_square(&t.url, 32)));
++    let found = slides[idx].thumbs.last().and_then(|t| fx::cover_tint(&ctx, &crate::model::sized_square(&t.url, SOFT_PX)));
 +    let tkey = id.with("tint");
 +    let last = ctx.data(|d| d.get_temp::<Color32>(tkey)).unwrap_or(Color32::from_gray(40));
 +    let target = found.unwrap_or(last);
@@ -2889,7 +2905,8 @@ index 00000000..3150d19f
 +    let name = who(app);
 +    let title = if name.is_empty() { fx::greeting(hh).to_owned() } else { format!("{}, {}", fx::greeting(hh), name) };
 +    ui.painter().text(pos2(greet.left() + 2.0, greet.top() + 6.0), Align2::LEFT_TOP, &title, theme::bold(34.0), theme::text());
-+    let when = format!("{}, {} {} · {:02}:{:02}", fx::DAYS[wd % 7], dd, fx::MONTHS[(mo as usize).saturating_sub(1).min(11)], hh, mm);
++    let (h12, ampm) = (if hh % 12 == 0 { 12 } else { hh % 12 }, if hh < 12 { "AM" } else { "PM" });
++    let when = format!("{}, {} {} · {}:{:02} {}", fx::DAYS[wd % 7], fx::MONTHS[(mo as usize).saturating_sub(1).min(11)], dd, h12, mm, ampm);
 +    ui.painter().text(pos2(greet.left() + 3.0, greet.top() + 50.0), Align2::LEFT_TOP, when, theme::semibold(14.0), theme::text_dim());
 +
 +    if ui.is_rect_visible(card) {
