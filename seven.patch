@@ -2175,7 +2175,7 @@ index bc4220d..6b2305f 100644
      let builder = builder.with_tooltip("YT Music");
      Ok((builder.build()?, toggle))
 diff --git a/src/ui/actions.rs b/src/ui/actions.rs
-index f869295..a950482 100644
+index f869295..fd35112 100644
 --- a/src/ui/actions.rs
 +++ b/src/ui/actions.rs
 @@ -414,8 +414,12 @@ impl App {
@@ -2185,7 +2185,7 @@ index f869295..a950482 100644
 -                    } else {
 +                    } else if self.np_open {
                          self.np_open = false;
-+                    } else if !ctx.wants_keyboard_input() {
++                    } else if !ctx.egui_wants_keyboard_input() {
 +                        // Nothing left to close: Esc toggles the window between maximized
 +                        // (the whole screen, no title bar) and a normal window.
 +                        super::titlebar::toggle_maximized(ctx);
