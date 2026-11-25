@@ -2192,6 +2192,28 @@ index f869295..fd35112 100644
                      }
                  }
                  keys::Cmd::MiniPlayer => self.actions.push(Action::Mini(!self.mini.target())),
+diff --git a/src/ui/dialogs.rs b/src/ui/dialogs.rs
+index 420d560..ab42213 100644
+--- a/src/ui/dialogs.rs
++++ b/src/ui/dialogs.rs
+@@ -57,7 +57,7 @@ impl App {
+                         pages::divider(ui);
+                         ui.add_space(6.0);
+                         let cards = self.library.as_ref().map(|l| l.playlists.clone()).unwrap_or_default();
+-                        egui::ScrollArea::vertical().max_height(340.0).auto_shrink([false, true]).show(ui, |ui| {
++                        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(340.0).auto_shrink([false, true]).show(ui, |ui| {
+                             for card in cards {
+                                 if let Target::Playlist(id) = card.target {
+                                     if !id.starts_with("PL") { continue; }
+@@ -191,7 +191,7 @@ fn about_dialog(ui: &mut Ui, title: &str, artist: &str, description: &Option<Opt
+     match description {
+         None => { ui.spinner(); }
+         Some(Some(text)) => {
+-            egui::ScrollArea::vertical().max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
++            egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
+                 ui.add(egui::Label::new(egui::RichText::new(text.as_str()).font(theme::regular(14.0)).color(theme::text())).wrap());
+             });
+             ui.add_space(12.0);
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
 index 0000000..7d2b9cd
@@ -2781,10 +2803,10 @@ index 288ad8c..4696a38 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 0000000..00d4bba
+index 0000000..e02b117
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,453 @@
+@@ -0,0 +1,459 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! One wide card at the top of Home. It stands on a heavily softened copy of the cover
@@ -3126,8 +3148,14 @@ index 0000000..00d4bba
 +    // The pages keep time: a dissolve runs at frame rate, the wait between at a trickle.
 +    if f < 1.0 {
 +        ctx.request_repaint();
-+    } else {
++    } else if hold {
++        // Resting on the card keeps its clock ticking at the old pace.
 +        ctx.request_repaint_after(Duration::from_millis(250));
++    } else {
++        // Left alone, the next thing to show is the next slide (or the clock's minute):
++        // wake for that, not four times a second.
++        let until_next = if n > 1 { EVERY - (now - since) } else { 1.0 };
++        ctx.request_repaint_after(Duration::from_secs_f64(until_next.clamp(0.05, 1.0)));
 +    }
 +
 +    let s = &slides[idx];
@@ -3251,6 +3279,19 @@ index 5fb5537..1f1cd7c 100644
              settings_field(ui, &mut app.jam_server, "jam.example.com", 96);
          });
      });
+diff --git a/src/ui/lyrics_share.rs b/src/ui/lyrics_share.rs
+index a3a7519..b943ae1 100644
+--- a/src/ui/lyrics_share.rs
++++ b/src/ui/lyrics_share.rs
+@@ -205,7 +205,7 @@ pub(super) fn show(ctx: &egui::Context, slot: &mut Option<LyricsShare>) {
+                     ui.label(egui::RichText::new("Select the lines to include. Tap a selected line again to remove it.").color(theme::text_dim()));
+                     ui.add_space(8.0);
+                     let max_h = (ctx.content_rect().height() - 340.0).clamp(100.0, 420.0);
+-                    egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
++                    egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                         for (i, line) in state.lines.iter().enumerate() {
+                             let chosen = state.selection.picks.contains(&i);
+                             let label = format!("{}  {}", if chosen { "☑" } else { "☐" }, line.text);
 diff --git a/src/ui/mini.rs b/src/ui/mini.rs
 index 249fb6f..b81defb 100644
 --- a/src/ui/mini.rs
@@ -3612,7 +3653,7 @@ index 252e6b9..50c190e 100644
      // A saved size below the minimum (closed while minimized saves a tiny one, which
      // eframe restores as-is) would open a window too small to see: start over centred.
 diff --git a/src/ui/notes.rs b/src/ui/notes.rs
-index f0c14b8..b8d22a9 100644
+index f0c14b8..d3b21ea 100644
 --- a/src/ui/notes.rs
 +++ b/src/ui/notes.rs
 @@ -199,7 +199,7 @@ pub fn dialog(app: &mut App, ctx: &egui::Context) {
@@ -3624,8 +3665,17 @@ index f0c14b8..b8d22a9 100644
              ui.add_space(6.0);
              let sub = if d.ready {
                  format!("You're on {}. It's downloaded and installs when you close the app.", crate::update::current_version())
+@@ -210,7 +210,7 @@ pub fn dialog(app: &mut App, ctx: &egui::Context) {
+         });
+         hline(ui);
+         let max_h = (ctx.content_rect().height() - 330.0).clamp(160.0, 460.0);
+-        egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+             egui::Frame::new().inner_margin(Margin { left: 28, right: 28, top: 18, bottom: 18 }).show(ui, |ui| {
+                 match &body {
+                     Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..7875e0d 100644
+index 28fc376..900e942 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -296,6 +296,15 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
@@ -3865,11 +3915,29 @@ index 28fc376..7875e0d 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
+@@ -1267,7 +1329,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+ fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
+     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+     let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
+-    egui::ScrollArea::vertical().id_salt(scroll_id).auto_shrink(false).show(&mut child, |ui| {
++    egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).id_salt(scroll_id).auto_shrink(false).show(&mut child, |ui| {
+         ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
+         ui.add_space(14.0);
+         let style = &app.look().lyrics;
+@@ -1317,7 +1379,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+         let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
+         let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
+         ui.set_max_height(max_height);
+-        egui::ScrollArea::vertical().max_height(max_height).min_scrolled_height(1.0).auto_shrink([false, true]).show(ui, |ui| {
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(max_height).min_scrolled_height(1.0).auto_shrink([false, true]).show(ui, |ui| {
+             ui.add_space(4.0);
+             if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
+                 // First in the menu, so unfolding it only ever adds rows below the ⋯:
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7..7237cc4 100644
+index 899a3c7..6bac12e 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
-@@ -65,6 +65,8 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+@@ -65,18 +65,28 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
          ui.ctx().request_repaint();
      }
      ui.set_opacity(0.15 + 0.85 * t);
@@ -3877,8 +3945,9 @@ index 899a3c7..7237cc4 100644
 +    super::fx::begin_page(ui.ctx(), if app.page_changed < 0.0 { 0.0 } else { now - app.page_changed });
      let page = app.page.clone();
      // Each page (each album, each search) keeps its own scroll position.
-     let mut area = egui::ScrollArea::vertical().id_salt(("page", &page)).auto_shrink(false);
-@@ -72,11 +74,19 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+-    let mut area = egui::ScrollArea::vertical().id_salt(("page", &page)).auto_shrink(false);
++    let mut area = egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).id_salt(("page", &page)).auto_shrink(false);
+     // Dev hook: YTM_SCROLL=<px> pins the page scroll, for screenshots of lower sections.
      if let Some(y) = super::dev_var("YTM_SCROLL").and_then(|v| v.parse::<f32>().ok()) {
          area = area.vertical_scroll_offset(y);
      }
@@ -3898,7 +3967,7 @@ index 899a3c7..7237cc4 100644
          match &page {
              Page::Home => home(app, ui, now),
              Page::New => new(app, ui, now),
-@@ -91,8 +101,12 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+@@ -91,8 +101,15 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
              Page::Transfer => super::transfer::page(app, ui, now),
          }
          // Room to scroll the last rows clear of the player's frosted strip.
@@ -3908,11 +3977,14 @@ index 899a3c7..7237cc4 100644
 +    // What stays at the top as the page scrolls (Home's mark turning into its name, a
 +    // playlist's title).
 +    super::fx::pinned_head(app, ui, &page, out.inner_rect, out.state.clamped_offset().y);
-+    super::fx::profile_button(app, ui, out.inner_rect);
++    // Not on Search: its box and chips own that corner.
++    if !matches!(page, Page::Search(_)) {
++        super::fx::profile_button(app, ui, out.inner_rect);
++    }
      selection_bar(app, ui.ctx(), &page, out.inner_rect);
      // Infinite scroll on home: fetch the next shelves when nearing the bottom.
      if page == Page::Home {
-@@ -770,12 +784,17 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
+@@ -770,12 +787,17 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
  // ------------------------------------------------------------------ home
  
  fn home(app: &mut App, ui: &mut Ui, now: f64) {
@@ -3931,7 +4003,7 @@ index 899a3c7..7237cc4 100644
      // Apple's Home has no banner: its lead shelf is a run of portrait tiles, and every
      // shelf after it takes the shape its own cards ask for.
      let rows = Rows::new(app, now);
-@@ -1273,18 +1292,18 @@ pub(super) fn page_title(ui: &mut Ui, title: &str) {
+@@ -1273,18 +1295,18 @@ pub(super) fn page_title(ui: &mut Ui, title: &str) {
  
  // ------------------------------------------------------------------ search
  
@@ -3955,7 +4027,7 @@ index 899a3c7..7237cc4 100644
      super::shell::search_field(app, ui, w);
      ui.add_space(8.0);
      ui.horizontal(|ui| {
-@@ -1296,6 +1315,11 @@ fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
+@@ -1296,6 +1318,11 @@ fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
              app.search_library_only = true;
          }
      });
@@ -3967,7 +4039,7 @@ index 899a3c7..7237cc4 100644
  
      if app.search_library_only {
          let q_input = app.search_text.trim();
-@@ -1539,12 +1563,17 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
+@@ -1539,12 +1566,17 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
          app.backend.request(crate::backend::Req::PageArt { key: id.to_owned(), url: cover });
      }
      if held {
@@ -3989,7 +4061,7 @@ index 899a3c7..7237cc4 100644
      }
      // The header's motion sleeve, asked for before the release is borrowed below.
      // Albums only: playlist covers stay still.
-@@ -1552,6 +1581,7 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
+@@ -1552,6 +1584,7 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
          Some(o) => (o.c.title.clone(), o.c.artists.first().map(|a| a.name.clone()).unwrap_or_else(|| o.c.byline())),
          None => (String::new(), String::new()),
      };
@@ -3997,7 +4069,7 @@ index 899a3c7..7237cc4 100644
      // The header keeps its still sleeve: moving artwork belongs to the player.
      let sprite: Option<widgets::MotionSprite> = None;
      let accent = app.accent_color();
-@@ -2761,6 +2791,8 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
+@@ -2761,6 +2794,8 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
      }
      page_title(ui, "Settings");
      settings_search_bar(ui, &mut app.settings_search);
@@ -4006,7 +4078,7 @@ index 899a3c7..7237cc4 100644
      settings_account(app, ui);
      settings_playback(app, ui);
      settings_hires(app, ui);
-@@ -2776,6 +2808,177 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
+@@ -2776,6 +2811,177 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
      settings_card(ui, |ui| network(app, ui));
      super::transfer::settings_section(app, ui);
      settings_shortcuts(app, ui);
@@ -4184,7 +4256,16 @@ index 899a3c7..7237cc4 100644
  }
  
  /// The box above Settings: what's typed in it leaves only the sections and rows that say
-@@ -2936,7 +3139,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
+@@ -2887,7 +3093,7 @@ fn channel_picker(app: &mut App, ui: &mut Ui) {
+     egui::Popup::menu(&btn).show(|ui| {
+         ui.set_width(300.0);
+         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+-        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(320.0).show(ui, |ui| {
+             ui.add_space(4.0);
+             for c in list {
+                 if option_row(ui, &label(c), c.page_id == *current).clicked() {
+@@ -2936,7 +3142,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
              }
          });
          divider(ui);
@@ -4193,7 +4274,7 @@ index 899a3c7..7237cc4 100644
              output_device_picker(app, ui);
          });
          divider(ui);
-@@ -2999,7 +3202,7 @@ fn settings_equalizer(app: &mut App, ui: &mut Ui) {
+@@ -2999,7 +3205,7 @@ fn settings_equalizer(app: &mut App, ui: &mut Ui) {
      section_label(ui, "Equalizer", None);
      ui.add_space(4.0);
      settings_card(ui, |ui| {
@@ -4202,7 +4283,16 @@ index 899a3c7..7237cc4 100644
              if toggle(ui, &mut app.eq_on, "Equalizer").changed() {
                  app.set_eq();
              }
-@@ -3491,6 +3694,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3274,7 +3480,7 @@ fn settings_lyrics(app: &mut App, ui: &mut Ui) {
+             egui::Popup::menu(&btn).show(|ui| {
+                 ui.set_width(200.0);
+                 ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+-                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
++                egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(320.0).show(ui, |ui| {
+                     ui.add_space(4.0);
+                     for (code, name) in super::lyric_prefs::LANGUAGES {
+                         let on = app.lyric_prefs.target == *code;
+@@ -3491,6 +3697,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.anim_bg, "Animated background");
          });
          divider(ui);
@@ -4217,7 +4307,7 @@ index 899a3c7..7237cc4 100644
          setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
              toggle(ui, &mut app.reactive_bg, "Pulse with the music");
          });
-@@ -3511,10 +3722,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
+@@ -3511,10 +3725,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.close_to_tray, "Close to tray");
          });
          divider(ui);
@@ -4228,7 +4318,7 @@ index 899a3c7..7237cc4 100644
          let api = crate::renderer::api_name();
          let title = format!("Draw with {api}");
          let desc = format!(
-@@ -3593,8 +3800,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3593,8 +3803,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
                      });
                  });
                  divider(ui);
@@ -4239,7 +4329,7 @@ index 899a3c7..7237cc4 100644
                  });
              }
          });
-@@ -3609,7 +3816,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3609,7 +3819,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
          let busy = app.lastfm_busy.load(Ordering::Relaxed);
          let desc = match &app.lastfm_user {
              Some(name) => format!("Scrobbling what you play to {name}'s profile."),
@@ -4248,7 +4338,7 @@ index 899a3c7..7237cc4 100644
              None => "Scrobble what you play to your Last.fm profile.".to_owned(),
          };
          let (mut connect, mut disconnect) = (false, false);
-@@ -3722,7 +3929,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3722,7 +3932,7 @@ fn network(app: &mut App, ui: &mut Ui) {
      use crate::proxy::{self, Setting};
      let same = |a: &Setting, b: &Setting| std::mem::discriminant(a) == std::mem::discriminant(b);
      let mut pick = None;
@@ -4257,7 +4347,7 @@ index 899a3c7..7237cc4 100644
          let btn = dropdown_button(ui, app.proxy_mode.label(), 220.0, "Proxy");
          egui::Popup::menu(&btn).show(|ui| {
              ui.set_width(220.0);
-@@ -3754,7 +3961,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3754,7 +3964,7 @@ fn network(app: &mut App, ui: &mut Ui) {
              divider(ui);
              let desc = match proxy::system() {
                  Some(p) => format!("Windows is set to use {}.", proxy::redact(&p)),
@@ -4266,7 +4356,25 @@ index 899a3c7..7237cc4 100644
              };
              setting_row(ui, "Windows proxy", Some(&desc), |_| {});
          }
-@@ -3993,15 +4200,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
+@@ -3844,7 +4054,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
+     egui::Popup::menu(&btn).show(|ui| {
+         ui.set_width(220.0);
+         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+-        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(360.0).show(ui, |ui| {
+             ui.add_space(4.0);
+             let mut row = |ui: &mut Ui, label: &str, value: &str| {
+                 let on = current.eq_ignore_ascii_case(value);
+@@ -3907,7 +4117,7 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
+     egui::Popup::menu(&btn).show(|ui| {
+         ui.set_width(340.0);
+         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+-        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(320.0).show(ui, |ui| {
+             ui.add_space(4.0);
+             if option_row(ui, SYSTEM_DEFAULT, app.output_device.is_none()).clicked() {
+                 pick = Some(None);
+@@ -3993,15 +4203,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
      if !s.shown {
          return;
      }
@@ -4319,7 +4427,7 @@ index 899a3c7..7237cc4 100644
      if !settings_group_shown(ui) {
          return;
 diff --git a/src/ui/shell.rs b/src/ui/shell.rs
-index 96240d4..2a0ef77 100644
+index 96240d4..c89cdb4 100644
 --- a/src/ui/shell.rs
 +++ b/src/ui/shell.rs
 @@ -162,6 +162,7 @@ fn history_button(ui: &mut Ui, at: Pos2, glyph: char, name: &str) -> bool {
@@ -4330,6 +4438,15 @@ index 96240d4..2a0ef77 100644
  pub fn sidebar(app: &mut App, ui: &mut Ui) {
      // Measured off the reference panel at 2x: rows walk on a 44 pt pitch and the mark
      // sits 28 in from the content edge, the label 56. The pill wears most of that pitch.
+@@ -344,7 +345,7 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
+             return;
+         }
+         let bars = if t > 0.0 { egui::scroll_area::ScrollBarVisibility::AlwaysHidden } else { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded };
+-        egui::ScrollArea::vertical().id_salt("sidebar-pl").auto_shrink(false).scroll_bar_visibility(bars).show(ui, |ui| {
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).id_salt("sidebar-pl").auto_shrink(false).scroll_bar_visibility(bars).show(ui, |ui| {
+             // Last launch's list until the library arrives.
+             let Some(playlists) = app.library.as_ref().map(|l| &l.playlists).or(app.sidebar_cache.as_ref()) else {
+                 // The spinner animates every frame: give up on a request that never answered.
 @@ -447,14 +448,14 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
              let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
              let mut resp = named(resp, "Restart to update").on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -4609,6 +4726,15 @@ index 96240d4..2a0ef77 100644
      let key = egui::Id::unique("bitchord-mark");
      let tex = match ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(key)) {
          Some(t) => t,
+@@ -1499,7 +1520,7 @@ pub fn queue_list(app: &mut App, ui: &mut Ui, salt: &str, close: bool) {
+     let seed = app.queue_seed.as_deref() != Some(seed_key.as_str());
+     let h = QUEUE_ROW_H + ui.spacing().item_spacing.y;
+     let want = cur as f32 * h;
+-    let mut area = egui::ScrollArea::vertical().id_salt(("queue", salt)).auto_shrink(false);
++    let mut area = egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).id_salt(("queue", salt)).auto_shrink(false);
+     if seed {
+         area = area.vertical_scroll_offset(want);
+     }
 diff --git a/src/ui/stats.rs b/src/ui/stats.rs
 new file mode 100644
 index 0000000..80bdf75
@@ -4701,7 +4827,7 @@ index 0000000..80bdf75
 +}
 diff --git a/src/ui/tabbar.rs b/src/ui/tabbar.rs
 new file mode 100644
-index 0000000..2762c16
+index 0000000..5d5141e
 --- /dev/null
 +++ b/src/ui/tabbar.rs
 @@ -0,0 +1,360 @@
@@ -5011,7 +5137,7 @@ index 0000000..2762c16
 +    let mut hide: Option<String> = None;
 +    let mut open_target: Option<Page> = None;
 +    ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
-+        egui::ScrollArea::vertical()
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
 +            .id_salt("rail-playlists")
 +            .auto_shrink(false)
 +            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -5066,7 +5192,7 @@ index 0000000..2762c16
 +    }
 +}
 diff --git a/src/ui/titlebar.rs b/src/ui/titlebar.rs
-index c5555a8..9bce07b 100644
+index c5555a8..b069882 100644
 --- a/src/ui/titlebar.rs
 +++ b/src/ui/titlebar.rs
 @@ -26,11 +26,29 @@ pub fn custom() -> bool {
@@ -5121,7 +5247,7 @@ index c5555a8..9bce07b 100644
      use windows::Win32::UI::Controls::MARGINS;
      use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 -    use windows::Win32::UI::WindowsAndMessaging::{NCCALCSIZE_PARAMS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, WM_CHAR, WM_NCCALCSIZE, WM_SYSCHAR};
-+    use windows::Win32::UI::WindowsAndMessaging::{IsZoomed, MINMAXINFO, NCCALCSIZE_PARAMS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, WM_CHAR, WM_GETMINMAXINFO, WM_NCCALCSIZE, WM_SYSCHAR};
++    use windows::Win32::UI::WindowsAndMessaging::{IsZoomed, MINMAXINFO, NCCALCSIZE_PARAMS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, WM_CHAR, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE, WM_SYSCHAR};
  
      pub fn init(hwnd: *mut std::ffi::c_void) {
          let hwnd = HWND(hwnd);
@@ -5141,10 +5267,16 @@ index c5555a8..9bce07b 100644
              // Have Windows ask for the window's areas again.
              let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
          }
-@@ -310,12 +338,42 @@ mod frame {
+@@ -310,12 +338,48 @@ mod frame {
                  let _ = DefSubclassProc(hwnd, msg, wparam, lparam);
                  return LRESULT(0);
              }
++            // Gaining or losing focus (the Start menu, Alt+Tab): Windows repaints the frame in
++            // its active or inactive look, which on a window that draws all of itself shows as a
++            // dark flash over the app. lParam -1 tells it to leave the frame alone.
++            if msg == WM_NCACTIVATE {
++                return DefSubclassProc(hwnd, msg, wparam, LPARAM(-1));
++            }
 +            // Maximizing: the window is exactly the monitor's work area, no more (a frame
 +            // that spills past the screen) and no less (a gap along an edge).
 +            if msg == WM_GETMINMAXINFO {
@@ -5184,8 +5316,39 @@ index c5555a8..9bce07b 100644
              // winit's shift: the same rectangle a pixel lower. Anything else is its own
              // sizing (maximized), kept.
              let r = params.rgrc[0];
+diff --git a/src/ui/transfer.rs b/src/ui/transfer.rs
+index 821455d..4f8063d 100644
+--- a/src/ui/transfer.rs
++++ b/src/ui/transfer.rs
+@@ -279,7 +279,7 @@ fn setup(app: &mut App, ui: &mut Ui) {
+                         // stretch the page.
+                         let row = 64.0 + ui.spacing().item_spacing.y;
+                         let h = row * library.len().min(5) as f32 - ui.spacing().item_spacing.y;
+-                        egui::ScrollArea::vertical()
++                        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                             .id_salt("xfer-library")
+                             .auto_shrink([false, true])
+                             .min_scrolled_height(h)
+@@ -957,7 +957,7 @@ fn review(app: &mut App, ui: &mut Ui) {
+                     const ROW: f32 = 46.0;
+                     let list_h = ui.available_height();
+                     let n = if app.xfer.show_matched { matched.len() } else { total };
+-                    let mut area = egui::ScrollArea::vertical().id_salt(("xfer-queue", app.xfer.show_matched)).auto_shrink([false, false]).max_height(list_h);
++                    let mut area = egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).id_salt(("xfer-queue", app.xfer.show_matched)).auto_shrink([false, false]).max_height(list_h);
+                     // Keep the song on screen in view when it changes.
+                     if !app.xfer.show_matched && app.xfer.scrolled_to != Some(at) {
+                         app.xfer.scrolled_to = Some(at);
+@@ -1040,7 +1040,7 @@ fn review(app: &mut App, ui: &mut Ui) {
+                 // A fixed height, the same for every song, so the buttons under the list stay
+                 // put; longer lists scroll inside it.
+                 let room = (ui.ctx().content_rect().height() - 560.0).clamp(52.0 * 3.5, 52.0 * 8.0);
+-                egui::ScrollArea::vertical()
++                egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                     .id_salt(("xfer-cands", at))
+                     .auto_shrink([false, false])
+                     .min_scrolled_height(room)
 diff --git a/src/ui/widgets.rs b/src/ui/widgets.rs
-index f44bea1..0f12466 100644
+index f44bea1..1e7c4b8 100644
 --- a/src/ui/widgets.rs
 +++ b/src/ui/widgets.rs
 @@ -199,7 +199,7 @@ pub fn icon_button(ui: &mut Ui, glyph: char, size: f32, name: &str, active: bool
@@ -5310,6 +5473,15 @@ index f44bea1..0f12466 100644
          play_hit = p.clicked();
          if !poster {
              let mc = img.right_bottom() + vec2(-edge, -edge + rise);
+@@ -861,7 +913,7 @@ pub fn menu_popup(popup: egui::Popup<'_>, width: f32, add: impl FnOnce(&mut Ui))
+         // The popup's own frame padding: the rows have to fit inside it, not just in the window.
+         let pad = egui::Frame::popup(ui.style()).total_margin().sum().y;
+         let max_h = (room - pad - 6.0).max(96.0);
+-        egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| add(ui));
++        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).max_height(max_h).show(ui, |ui| add(ui));
+     });
+ }
+ 
 diff --git a/src/ytmapi.rs b/src/ytmapi.rs
 index 90e66f6..fb467b9 100644
 --- a/src/ytmapi.rs
