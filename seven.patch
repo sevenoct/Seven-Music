@@ -3973,7 +3973,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..65abf1e 100644
+index 28fc376..a9a734d 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -296,10 +296,22 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
@@ -4218,7 +4218,7 @@ index 28fc376..65abf1e 100644
 -    (col.width() * 0.82 * cs.size.clamp(0.5, 1.35)).min(col.height() - 250.0).max(160.0)
 +fn art_side(cs: &crate::preset::CoverStyle, col: Rect, old: bool) -> f32 {
 +    // The minimal layout carries the volume row under the transport.
-+    let reserve = if old { 250.0 } else { 330.0 };
++    let reserve = if old { 250.0 } else { 360.0 };
 +    (col.width() * 0.82 * cs.size.clamp(0.5, 1.35)).min(col.height() - reserve).max(160.0)
  }
  
@@ -4229,7 +4229,7 @@ index 28fc376..65abf1e 100644
      let cs = &look.cover;
 -    let art = Rect::from_center_size(pos2(col.center().x, col.top() + side / 2.0 + (col.height() - side - 250.0).max(0.0) * 0.42), Vec2::splat(side));
 +    let old = app.old_player;
-+    let reserve = if old { 250.0 } else { 330.0 };
++    let reserve = if old { 250.0 } else { 360.0 };
 +    let art = Rect::from_center_size(pos2(col.center().x, col.top() + side / 2.0 + (col.height() - side - reserve).max(0.0) * 0.42), Vec2::splat(side));
      let round = cs.shape != Shape::Rounded;
      let radius = if round { side / 2.0 } else { cs.radius.clamp(0.0, side / 2.0) };
@@ -4262,9 +4262,9 @@ index 28fc376..65abf1e 100644
 +    let text_w = if old { w - 112.0 } else { w };
 +    // Minimal: the transport's row, then the volume, then the song's three buttons (best
 +    // part, star, menu) centred under both. `ty_new` is the transport's centre line.
-+    let icon_mid = side * 0.075;
-+    let ty_new = (info_y + 54.0 + 30.0 + icon_mid * 0.6).min(col.bottom() - 94.0 - icon_mid * 0.5);
-+    let btn_y = ty_new + icon_mid * 0.5 + 67.0;
++    let icon_mid = side * 0.088;
++    let ty_new = (info_y + 62.0 + 40.0 + icon_mid * 0.6).min(col.bottom() - 110.0 - icon_mid * 0.5);
++    let btn_y = ty_new + icon_mid * 0.5 + 86.0;
 +    let ctl = |old_dx: f32, new_dx: f32| if old { pos2(art.right() + old_dx, info_y + 14.0) } else { pos2(art.center().x + new_dx, btn_y) };
      // Apple keeps "(Explicit)" out of the name and wears it as a small colour-synced square
      // after the title instead.
@@ -4339,14 +4339,18 @@ index 28fc376..65abf1e 100644
  
      // Seek: a 4 px line that grows under the pointer, its times below.
      let status = app.audio.status.clone();
-@@ -946,47 +1069,60 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -944,49 +1067,63 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+     // Transport first, because its measures set the step under the times line: the row is
+     // spread over the sleeve's own width — the outer pair a hair inside its edges, the
      // skips a little under a quarter of the side out from the play button.
-     let icons = [0.038f32, 0.055, 0.075, 0.055, 0.038].map(|f| side * f);
+-    let icons = [0.038f32, 0.055, 0.075, 0.055, 0.038].map(|f| side * f);
++    // The minimal player's play and skips share one size, the outer marks a touch larger than before.
++    let icons = if old { [0.038f32, 0.055, 0.075, 0.055, 0.038] } else { [0.046f32, 0.088, 0.088, 0.088, 0.046] }.map(|f| side * f);
      let sizes = icons.map(|s| s * 1.42);
 -    let hit = Rect::from_min_size(pos2(x0, info_y + 46.0), vec2(w, 16.0));
 +    // Minimal: the times stand either side of the bar, so the bar is shorter by their room.
 +    let (bx0, bw) = if old { (x0, w) } else { (x0 + 46.0, w - 92.0) };
-+    let hit = Rect::from_min_size(pos2(bx0, info_y + 46.0), vec2(bw, 16.0));
++    let hit = Rect::from_min_size(pos2(bx0, info_y + if old { 46.0 } else { 54.0 }), vec2(bw, 16.0));
      let sy = hit.center().y;
      // Far enough under the bar for the quality mark's box to clear it: the mark stands on
      // this line, and the box that holds it reaches above the words.
@@ -4412,16 +4416,16 @@ index 28fc376..65abf1e 100644
      }
      // While the two songs blend, its name sits there instead.
      let mixed = theme::anim_bool(ui.ctx(), "np-automix-on", app.mixing(), 0.3);
-@@ -1009,7 +1145,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1009,7 +1146,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
  
      // Transport: the reference's row — shuffle, previous, play, next, repeat, spread over
      // the sleeve's own width.
 -    let xs = [-0.466f32, -0.206, 0.0, 0.206, 0.466].map(|f| art.center().x + side * f);
-+    let xs = if old { [-0.466f32, -0.206, 0.0, 0.206, 0.466] } else { [-0.30f32, -0.155, 0.0, 0.155, 0.30] }.map(|f| art.center().x + side * f);
++    let xs = if old { [-0.466f32, -0.206, 0.0, 0.206, 0.466] } else { [-0.34f32, -0.17, 0.0, 0.17, 0.34] }.map(|f| art.center().x + side * f);
      // The marks are primary white, an off shuffle or repeat tertiary; a pressed button
      // shrinks to 90%, as the reference's does.
      let ink = |h: f32, base: f32, on: f32| theme::with_alpha(theme::lerp_color(theme::with_alpha(Color32::WHITE, base), Color32::WHITE, h), on);
-@@ -1023,7 +1159,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1023,7 +1160,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -4430,7 +4434,7 @@ index 28fc376..65abf1e 100644
          }
          (resp, h, p)
      };
-@@ -1031,18 +1167,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1031,18 +1168,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let shuffled = app.queue.shuffled;
      let son = theme::anim_bool(ui.ctx(), r.id.with("on"), shuffled, 0.25);
      let mark = lit_mark(app, son, ink(h, 0.55, 1.0));
@@ -4452,7 +4456,7 @@ index 28fc376..65abf1e 100644
      let mark = ink(h, 1.0, dim);
      let morph = theme::anim_bool(ui.ctx(), "np-play-morph", app.playing() || app.buffering, 0.18);
      if app.buffering {
-@@ -1064,7 +1200,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1064,7 +1201,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.toggle();
      }
      let (r, h, p) = btn(ui, 3, "next", "Next", enabled);
@@ -4461,7 +4465,7 @@ index 28fc376..65abf1e 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1077,7 +1213,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1077,7 +1214,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
      let mark = lit_mark(app, ron, ink(h, 0.55, 1.0));
@@ -4470,19 +4474,19 @@ index 28fc376..65abf1e 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1085,6 +1221,11 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1085,6 +1222,11 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              Repeat::One => Repeat::Off,
          };
      }
 +    // Minimal: the volume stands under the transport, always in view.
 +    if !old && app.show_volume {
-+        let vr = Rect::from_min_size(pos2(art.center().x - w * 0.25 - 38.0, ty + icons[2] * 0.5 + 22.0), vec2(w * 0.5 + 42.0, 28.0));
++        let vr = Rect::from_min_size(pos2(art.center().x - w * 0.25 - 38.0, ty + icons[2] * 0.5 + 30.0), vec2(w * 0.5 + 42.0, 28.0));
 +        volume_bar(app, ui, vr);
 +    }
  }
  
  /// The Best Part mark: the music note the button has always carried, with the skip mark
-@@ -1267,7 +1408,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+@@ -1267,7 +1409,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
  fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
      let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
      let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
@@ -4491,7 +4495,7 @@ index 28fc376..65abf1e 100644
          ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
          ui.add_space(14.0);
          let style = &app.look().lyrics;
-@@ -1317,7 +1458,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1317,7 +1459,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
          let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
          let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
          ui.set_max_height(max_height);
