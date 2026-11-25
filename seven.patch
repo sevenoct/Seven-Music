@@ -2580,10 +2580,10 @@ index 288ad8c7..4696a38d 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 00000000..91bdd178
+index 00000000..00d4bba9
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,454 @@
+@@ -0,0 +1,453 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! One wide card at the top of Home. It stands on a heavily softened copy of the cover
@@ -2835,7 +2835,6 @@ index 00000000..91bdd178
 +        if swallow {
 +            ctx.input_mut(|i| {
 +                i.smooth_scroll_delta = egui::Vec2::ZERO;
-+                i.raw_scroll_delta = egui::Vec2::ZERO;
 +            });
 +        }
 +        ctx.data_mut(|d| d.insert_temp(sid, (acc, seen, stepped)));
