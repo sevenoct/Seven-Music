@@ -2174,24 +2174,6 @@ index bc4220d..6b2305f 100644
      #[cfg(not(target_os = "linux"))]
      let builder = builder.with_tooltip("YT Music");
      Ok((builder.build()?, toggle))
-diff --git a/src/ui/actions.rs b/src/ui/actions.rs
-index f869295..fd35112 100644
---- a/src/ui/actions.rs
-+++ b/src/ui/actions.rs
-@@ -414,8 +414,12 @@ impl App {
-                         self.set_fullscreen(ctx, false);
-                     } else if self.video_on {
-                         self.video_on = false;
--                    } else {
-+                    } else if self.np_open {
-                         self.np_open = false;
-+                    } else if !ctx.egui_wants_keyboard_input() {
-+                        // Nothing left to close: Esc toggles the window between maximized
-+                        // (the whole screen, no title bar) and a normal window.
-+                        super::titlebar::toggle_maximized(ctx);
-                     }
-                 }
-                 keys::Cmd::MiniPlayer => self.actions.push(Action::Mini(!self.mini.target())),
 diff --git a/src/ui/dialogs.rs b/src/ui/dialogs.rs
 index 420d560..ab42213 100644
 --- a/src/ui/dialogs.rs
@@ -2803,10 +2785,10 @@ index 288ad8c..4696a38 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 0000000..e02b117
+index 0000000..9e79107
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,459 @@
+@@ -0,0 +1,442 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! One wide card at the top of Home. It stands on a heavily softened copy of the cover
@@ -3102,27 +3084,10 @@ index 0000000..e02b117
 +
 +    let f = theme::ease_out(((now - fade0) / FADE).clamp(0.0, 1.0) as f32);
 +
-+    // The page takes the lit slide's colour: a wash of the cover's hue over the top of
-+    // the window, glided from one slide's to the next, ending on the page's own ground.
-+    let ground = shell::page_ground(app);
-+    let screen = ctx.content_rect();
-+    let found = slides[idx].thumbs.last().and_then(|t| fx::cover_tint(&ctx, &crate::model::sized_square(&t.url, SOFT_PX)));
-+    let tkey = id.with("tint");
-+    let last = ctx.data(|d| d.get_temp::<Color32>(tkey)).unwrap_or(Color32::from_gray(40));
-+    let target = found.unwrap_or(last);
-+    ctx.data_mut(|d| d.insert_temp(tkey, target));
-+    let tint = fx::glide(&ctx, "home-tint", target, 1.1);
-+    let wash_top_c = theme::lerp_color(ground, tint, 0.32);
-+    let wash_top = (greet.top() - 18.0).min(screen.top());
-+    let wash_bottom = card.bottom() + 170.0;
-+    let wash = Rect::from_min_max(pos2(screen.left(), wash_top), pos2(ui.clip_rect().right().max(screen.left() + 1.0), wash_bottom));
-+    let mut wp = ctx.layer_painter(ui.layer_id()).with_clip_rect(wash);
-+    wp.set_opacity(ui.opacity());
-+    shell::vgradient(&wp, wash, wash_top_c, ground);
-+    // What the card has to end on at its foot: the wash's colour there.
-+    let end = theme::lerp_color(wash_top_c, ground, ((card.bottom() - wash_top) / (wash_bottom - wash_top)).clamp(0.0, 1.0));
++    // The page stays black: no wash of the cover's colour behind the carousel.
++    let end = shell::page_ground(app);
 +
-+    // Greeting and clock, over the wash.
++    // Greeting and clock.
 +    let (hh, mm, wd, dd, mo) = fx::local_clock();
 +    let name = who(app);
 +    let title = if name.is_empty() { fx::greeting(hh).to_owned() } else { format!("{}, {}", fx::greeting(hh), name) };
@@ -3388,7 +3353,7 @@ index 249fb6f..b81defb 100644
              && (sresp.clicked() || sresp.dragged())
          {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..50c190e 100644
+index 252e6b9..e57885c 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,9 @@ mod backdrop;
@@ -3553,7 +3518,7 @@ index 252e6b9..50c190e 100644
              let section = ui.available_rect_before_wrap();
              let q = theme::anim_bool(&ctx, "queue-drawer", self.queue_open && !self.np_open, 0.25);
              if q > 0.01 {
-@@ -2188,11 +2203,14 @@ impl eframe::App for App {
+@@ -2188,11 +2203,13 @@ impl eframe::App for App {
              let main_right = ui.available_rect_before_wrap().right();
              egui::CentralPanel::default()
                  .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -3565,12 +3530,11 @@ index 252e6b9..50c190e 100644
                      right: 0,
 -                    top: titlebar::top_margin(14, 42.0),
 +                    // Room above the page for the history chevrons the sidebar used to carry.
-+                    // Maximized, nothing stands above the page: it runs to the very top.
-+                    top: if titlebar::flush() { 0 } else { titlebar::top_margin(14, 42.0).saturating_add(30) },
++                    top: titlebar::top_margin(14, 42.0).saturating_add(30),
                      bottom: 0,
                  }))
                  .show(ui, |ui| {
-@@ -2211,6 +2229,8 @@ impl eframe::App for App {
+@@ -2211,6 +2228,8 @@ impl eframe::App for App {
                          shell::player_bar(self, ui, now, true);
                      });
                  });
@@ -3579,7 +3543,7 @@ index 252e6b9..50c190e 100644
          }
          if np > 0.001 {
              let pages = theme::set_mode(&ctx, false);
-@@ -2232,6 +2252,8 @@ impl eframe::App for App {
+@@ -2232,6 +2251,8 @@ impl eframe::App for App {
          self.mini.fade_in(&ctx, now, shell::base_color(self));
          // Menus carry the same blurred sleeve as the player bar, under their labels.
          shell::frost_menus(self, &ctx);
@@ -3588,7 +3552,7 @@ index 252e6b9..50c190e 100644
  
          if dev_var("YTM_THEME_TOUR").is_some() {
              self.theme_tour(&ctx, now);
-@@ -2392,6 +2414,10 @@ impl eframe::App for App {
+@@ -2392,6 +2413,10 @@ impl eframe::App for App {
              storage.set_string("font", theme::font_choice());
          }
          storage.set_string("anim_bg", b(self.anim_bg));
@@ -3599,7 +3563,7 @@ index 252e6b9..50c190e 100644
          storage.set_string("page_blobs", b(self.page_blobs));
          storage.set_string("reactive_bg", b(self.reactive_bg));
          storage.set_string("disable_blur", b(self.disable_blur));
-@@ -2543,6 +2569,43 @@ struct PlayingAs {
+@@ -2543,6 +2568,43 @@ struct PlayingAs {
  }
  
  
@@ -3643,15 +3607,6 @@ index 252e6b9..50c190e 100644
  /// A restored window size can exceed the monitor (e.g. saved after maximizing),
  /// leaving the player bar partly off-screen. Once at startup, maximize instead.
  fn fit_window_to_monitor(ctx: &egui::Context) {
-@@ -2567,6 +2630,8 @@ fn fit_window_to_monitor(ctx: &egui::Context) {
-     let (outer, monitor, maximized) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size, i.viewport().maximized));
-     let (Some(outer), Some(monitor)) = (outer, monitor) else { return };
-     ctx.data_mut(|d| d.insert_temp(done, true));
-+    // Opens maximized every time (the saved window state is only what Esc restores to).
-+    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, monitor);
-     // A saved size below the minimum (closed while minimized saves a tiny one, which
-     // eframe restores as-is) would open a window too small to see: start over centred.
 diff --git a/src/ui/notes.rs b/src/ui/notes.rs
 index f0c14b8..d3b21ea 100644
 --- a/src/ui/notes.rs
@@ -4427,10 +4382,29 @@ index 899a3c7..6bac12e 100644
      if !settings_group_shown(ui) {
          return;
 diff --git a/src/ui/shell.rs b/src/ui/shell.rs
-index 96240d4..c89cdb4 100644
+index 96240d4..45f6199 100644
 --- a/src/ui/shell.rs
 +++ b/src/ui/shell.rs
-@@ -162,6 +162,7 @@ fn history_button(ui: &mut Ui, at: Pos2, glyph: char, name: &str) -> bool {
+@@ -61,7 +61,8 @@ pub fn base_color(app: &App) -> Color32 {
+ /// before any page paints over it, so a wash that means to vanish into the page has to
+ /// end on this, not on the theme's own background colour.
+ pub fn page_ground(app: &App) -> Color32 {
+-    if app.page_blobs { base_color(app) } else if theme::light() { theme::bg() } else { Color32::BLACK }
++    // Home stays plain black (light: the theme's own background), whatever plays.
++    if app.page == Page::Home { if theme::light() { theme::bg() } else { Color32::BLACK } } else if app.page_blobs { base_color(app) } else if theme::light() { theme::bg() } else { Color32::BLACK }
+ }
+ 
+ pub fn background(app: &mut App, ui: &mut Ui, screen: Rect, now: f64, only: Option<Rect>) {
+@@ -85,7 +86,7 @@ pub fn background(app: &mut App, ui: &mut Ui, screen: Rect, now: f64, only: Opti
+         None => ui.painter().clone(),
+     };
+     painter.rect_filled(screen, 0.0, base_color(app));
+-    if !app.page_blobs {
++    if !app.page_blobs || app.page == Page::Home {
+         painter.rect_filled(screen, 0.0, if light { theme::bg() } else { Color32::BLACK });
+         return;
+     }
+@@ -162,6 +163,7 @@ fn history_button(ui: &mut Ui, at: Pos2, glyph: char, name: &str) -> bool {
  
  /// One layout for both states, so collapsing animates: the panel narrows while icons
  /// and covers keep their column and the labels fade and clip.
@@ -4438,7 +4412,7 @@ index 96240d4..c89cdb4 100644
  pub fn sidebar(app: &mut App, ui: &mut Ui) {
      // Measured off the reference panel at 2x: rows walk on a 44 pt pitch and the mark
      // sits 28 in from the content edge, the label 56. The pill wears most of that pitch.
-@@ -344,7 +345,7 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
+@@ -344,7 +346,7 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
              return;
          }
          let bars = if t > 0.0 { egui::scroll_area::ScrollBarVisibility::AlwaysHidden } else { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded };
@@ -4447,7 +4421,7 @@ index 96240d4..c89cdb4 100644
              // Last launch's list until the library arrives.
              let Some(playlists) = app.library.as_ref().map(|l| &l.playlists).or(app.sidebar_cache.as_ref()) else {
                  // The spinner animates every frame: give up on a request that never answered.
-@@ -447,14 +448,14 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
+@@ -447,14 +449,14 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
              let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
              let mut resp = named(resp, "Restart to update").on_hover_cursor(egui::CursorIcon::PointingHand);
              if collapsed {
@@ -4464,7 +4438,7 @@ index 96240d4..c89cdb4 100644
              }
              restart = resp.clicked();
          }
-@@ -510,8 +511,25 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
+@@ -510,8 +512,22 @@ pub fn sidebar(app: &mut App, ui: &mut Ui) {
  // ------------------------------------------------------------------ top bar
  
  pub fn top_bar(app: &mut App, ui: &mut Ui) {
@@ -4474,14 +4448,11 @@ index 96240d4..c89cdb4 100644
 +    let ctx = ui.ctx().clone();
 +    let mut back = false;
 +    let mut forward = false;
-+    // Maximized there is nothing above the page: no chevrons (Alt+Left / Alt+Right stay).
-+    if !super::titlebar::flush() {
 +    egui::Area::new(egui::Id::new("history-buttons")).order(egui::Order::Middle).fixed_pos(pos2(14.0, 12.0)).show(&ctx, |ui| {
 +        let (rect, _) = ui.allocate_exact_size(vec2(64.0, 28.0), Sense::hover());
 +        back = history_button(ui, pos2(rect.left() + 14.0, rect.center().y), icon::CHEVRON_LEFT, "Back");
 +        forward = history_button(ui, pos2(rect.left() + 40.0, rect.center().y), icon::CHEVRON_RIGHT, "Forward");
 +    });
-+    }
 +    if back {
 +        app.nav_back();
 +    }
@@ -4492,7 +4463,7 @@ index 96240d4..c89cdb4 100644
      if !app.loading {
          return;
      }
-@@ -872,6 +890,39 @@ pub fn grey_frost(app: &App, ui: &Ui, rect: Rect, radius: f32, alpha: f32) {
+@@ -872,6 +888,39 @@ pub fn grey_frost(app: &App, ui: &Ui, rect: Rect, radius: f32, alpha: f32) {
      ui.painter().rect_stroke(rect, radius, egui::Stroke::new(1.0, theme::with_alpha(theme::glass(0.16), alpha)), egui::StrokeKind::Inside);
  }
  
@@ -4532,7 +4503,7 @@ index 96240d4..c89cdb4 100644
  /// An opened release's own sleeve blown up behind its page. The blur is the cover's, so
  /// the page wears its colours; it dims and fades into the page ground before the first
  /// row, so the words on top never have to fight the picture.
-@@ -891,18 +942,23 @@ pub fn cover_wash(app: &App, ui: &mut Ui, rect: Rect) {
+@@ -891,18 +940,23 @@ pub fn cover_wash(app: &App, ui: &mut Ui, rect: Rect) {
              t
          }
      };
@@ -4560,7 +4531,7 @@ index 96240d4..c89cdb4 100644
  fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle, egui::TextureHandle, egui::TextureHandle)> {
      let (key, rgba) = app.frost_art.as_ref()?;
      let id = egui::Id::unique("frost-tex");
-@@ -933,37 +989,12 @@ fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle
+@@ -933,37 +987,12 @@ fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle
      Some(t)
  }
  
@@ -4604,7 +4575,7 @@ index 96240d4..c89cdb4 100644
  }
  
  /// The player: one frosted capsule floating over the bottom of the window, as in the
-@@ -974,7 +1005,6 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -974,7 +1003,6 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      if frosted {
          // The page scrolls on under this strip: fade it out rather than end it at the
          // player's edge. Clicks in the fade stay with the player, not the rows beneath.
@@ -4612,7 +4583,7 @@ index 96240d4..c89cdb4 100644
          ui.interact(full, ui.id().with("player-strip"), Sense::hover());
      }
      // Apple's floating player, measured off its own page: a 52 pt pill of its own width,
-@@ -994,27 +1024,17 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -994,27 +1022,17 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      let text_w = (full.width() - 40.0 - (PAD * 2.0 + ART + 8.0 + GAP + t_w + GAP + u_w)).clamp(60.0, 200.0);
      let w = (PAD * 2.0 + ART + 8.0 + text_w + GAP + t_w + GAP + u_w).min(full.width() - 24.0);
      let cap = Rect::from_center_size(pos2(full.center().x, full.bottom() - 20.0 - H / 2.0), vec2(w, H));
@@ -4650,7 +4621,7 @@ index 96240d4..c89cdb4 100644
  
      let status = app.audio.status.clone();
      // An Automix handoff keeps the outgoing song on this strip until the next one is
-@@ -1059,19 +1079,20 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1059,19 +1077,20 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      };
      let r = tbtn(ui, sh_x, "shuffle", "Shuffle");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -4673,7 +4644,7 @@ index 96240d4..c89cdb4 100644
      let morph = theme::anim_bool(&ctx, "bar-play-morph", playing || app.buffering, 0.18);
      if app.buffering {
          let a = now as f32 * 6.0;
-@@ -1083,10 +1104,10 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1083,10 +1102,10 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
          // through a buffer, and a hard cut between the two weights flickers.
          let fg = ink(0.55 + 0.45 * h);
          if morph < 1.0 {
@@ -4686,7 +4657,7 @@ index 96240d4..c89cdb4 100644
          }
      }
      if r.clicked() && enabled {
-@@ -1094,7 +1115,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1094,7 +1113,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      }
      let r = tbtn(ui, nx_x, "next", "Next");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -4695,7 +4666,7 @@ index 96240d4..c89cdb4 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1105,7 +1126,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1105,7 +1124,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      };
      let r = tbtn(ui, rp_x, "repeat", "Repeat");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -4704,7 +4675,7 @@ index 96240d4..c89cdb4 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1194,7 +1215,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1194,7 +1213,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      // the times, which take the same row so nothing overlaps.
      let (title, _) = match &track {
          Some(t) => (t.title.clone(), ()),
@@ -4713,7 +4684,7 @@ index 96240d4..c89cdb4 100644
      };
      let fade = 1.0 - 0.7 * focus;
      let afade = 1.0 - focus;
-@@ -1346,10 +1367,10 @@ fn paint_mark(ui: &Ui, r: Rect) {
+@@ -1346,10 +1365,10 @@ fn paint_mark(ui: &Ui, r: Rect) {
  }
  
  /// The BitChord mark, fitted inside `r`, tinted `tint`.
@@ -4726,7 +4697,7 @@ index 96240d4..c89cdb4 100644
      let key = egui::Id::unique("bitchord-mark");
      let tex = match ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(key)) {
          Some(t) => t,
-@@ -1499,7 +1520,7 @@ pub fn queue_list(app: &mut App, ui: &mut Ui, salt: &str, close: bool) {
+@@ -1499,7 +1518,7 @@ pub fn queue_list(app: &mut App, ui: &mut Ui, salt: &str, close: bool) {
      let seed = app.queue_seed.as_deref() != Some(seed_key.as_str());
      let h = QUEUE_ROW_H + ui.spacing().item_spacing.y;
      let want = cur as f32 * h;
@@ -4827,10 +4798,10 @@ index 0000000..80bdf75
 +}
 diff --git a/src/ui/tabbar.rs b/src/ui/tabbar.rs
 new file mode 100644
-index 0000000..5d5141e
+index 0000000..effd8b0
 --- /dev/null
 +++ b/src/ui/tabbar.rs
-@@ -0,0 +1,360 @@
+@@ -0,0 +1,359 @@
 +//! The floating tab bar, after Mochy Music's Android navigation bar.
 +//!
 +//! A stadium of dark frosted glass hung above the player. One glyph per tab, outline
@@ -4927,8 +4898,7 @@ index 0000000..5d5141e
 +/// Draws the rail on the window's left edge, from under the chevrons down to the player.
 +pub fn show(app: &mut App, ctx: &egui::Context) {
 +    let screen = ctx.content_rect();
-+    // Maximized there are no chevrons above it: the rail starts at the edge gap.
-+    let top = screen.top() + if super::titlebar::flush() { EDGE } else { TOP };
++    let top = screen.top() + TOP;
 +    let bottom = screen.bottom() - app.bar_height() - ABOVE_PLAYER;
 +    if bottom - top < TABS_H + LOGO_H {
 +        return;
@@ -5192,51 +5162,10 @@ index 0000000..5d5141e
 +    }
 +}
 diff --git a/src/ui/titlebar.rs b/src/ui/titlebar.rs
-index c5555a8..b069882 100644
+index c5555a8..2f6d5a5 100644
 --- a/src/ui/titlebar.rs
 +++ b/src/ui/titlebar.rs
-@@ -26,11 +26,29 @@ pub fn custom() -> bool {
- /// around winit, so the app says when it's on, once a frame before drawing.
- pub fn set_fullscreen(ctx: &egui::Context, on: bool) {
-     ctx.data_mut(|d| d.insert_temp(Id::unique("titlebar-fullscreen"), on));
-+    // Said once a frame, before anything is laid out: whether the window is maximized.
-+    MAXIMIZED.store(maximized(ctx), std::sync::atomic::Ordering::Relaxed);
- }
- 
--/// Drawn now: not in full screen.
-+/// Whether the window is maximized, as of this frame's start. Maximized, the window is
-+/// borderless edge to edge: no title bar, no window buttons, no history chevrons, and
-+/// the page runs up to the top. Esc toggles it.
-+static MAXIMIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-+
-+/// True while the window is maximized with the app's own title bar (so: with nothing
-+/// above the page).
-+pub fn flush() -> bool {
-+    custom() && MAXIMIZED.load(std::sync::atomic::Ordering::Relaxed)
-+}
-+
-+/// Esc: maximized (the whole screen, nothing above the page) or back to a window.
-+pub fn toggle_maximized(ctx: &egui::Context) {
-+    ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized(ctx)));
-+}
-+
-+/// Drawn now: not in full screen, and not maximized (there the window is all page).
- fn shown(ctx: &egui::Context) -> bool {
--    custom() && !ctx.data(|d| d.get_temp::<bool>(Id::unique("titlebar-fullscreen")).unwrap_or(false)) && !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false))
-+    custom() && !maximized(ctx) && !ctx.data(|d| d.get_temp::<bool>(Id::unique("titlebar-fullscreen")).unwrap_or(false)) && !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false))
- }
- 
- fn maximized(ctx: &egui::Context) -> bool {
-@@ -55,7 +73,7 @@ pub fn traffic_inset() -> f32 {
- }
- 
- pub fn top_margin(normal: i8, row: f32) -> i8 {
--    if custom() { ((HEIGHT - row) / 2.0).round() as i8 } else { normal + traffic_inset() as i8 }
-+    if custom() && !flush() { ((HEIGHT - row) / 2.0).round() as i8 } else { normal + traffic_inset() as i8 }
- }
- 
- /// How much of `row` (a strip along the top) the window buttons cover from its right.
-@@ -263,11 +281,12 @@ mod frame {
+@@ -263,11 +263,12 @@ mod frame {
      use windows::Win32::Graphics::Dwm::{
          DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
          DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -5251,7 +5180,7 @@ index c5555a8..b069882 100644
  
      pub fn init(hwnd: *mut std::ffi::c_void) {
          let hwnd = HWND(hwnd);
-@@ -294,6 +313,15 @@ mod frame {
+@@ -294,6 +295,15 @@ mod frame {
                  &corner as *const DWM_WINDOW_CORNER_PREFERENCE as *const _,
                  std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
              );
@@ -5267,7 +5196,7 @@ index c5555a8..b069882 100644
              // Have Windows ask for the window's areas again.
              let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
          }
-@@ -310,12 +338,48 @@ mod frame {
+@@ -310,12 +320,48 @@ mod frame {
                  let _ = DefSubclassProc(hwnd, msg, wparam, lparam);
                  return LRESULT(0);
              }
