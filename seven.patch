@@ -2198,7 +2198,7 @@ index 420d560..ab42213 100644
              ui.add_space(12.0);
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
-index 0000000..7d2b9cd
+index 0000000..4c40b97
 --- /dev/null
 +++ b/src/ui/fx.rs
 @@ -0,0 +1,490 @@
@@ -2451,7 +2451,7 @@ index 0000000..7d2b9cd
 +pub const MONTHS: [&str; 12] = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 +
 +/// Used when no account has a name to greet.
-+pub const DEFAULT_NAME: &str = "Hasan";
++pub const DEFAULT_NAME: &str = "";
 +
 +// ------------------------------------------------------------------ cover colour
 +
@@ -2785,10 +2785,10 @@ index 288ad8c..4696a38 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 0000000..9e79107
+index 0000000..a0370f0
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,442 @@
+@@ -0,0 +1,460 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! One wide card at the top of Home. It stands on a heavily softened copy of the cover
@@ -2802,7 +2802,7 @@ index 0000000..9e79107
 +
 +use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 +
-+use super::{Action, App, fx, shell, widgets};
++use super::{Action, App, Page, fx, shell, widgets};
 +use crate::model::{ShelfKind, Target, Thumb, Track};
 +use crate::theme::{self, icon};
 +
@@ -3094,7 +3094,25 @@ index 0000000..9e79107
 +    ui.painter().text(pos2(greet.left() + 2.0, greet.top() + 6.0), Align2::LEFT_TOP, &title, theme::bold(34.0), theme::text());
 +    let (h12, ampm) = (if hh % 12 == 0 { 12 } else { hh % 12 }, if hh < 12 { "AM" } else { "PM" });
 +    let when = format!("{}, {} {} · {}:{:02} {}", fx::DAYS[wd % 7], fx::MONTHS[(mo as usize).saturating_sub(1).min(11)], dd, h12, mm, ampm);
-+    ui.painter().text(pos2(greet.left() + 3.0, greet.top() + 50.0), Align2::LEFT_TOP, when, theme::semibold(14.0), theme::text_dim());
++    let when_r = ui.painter().text(pos2(greet.left() + 3.0, greet.top() + 50.0), Align2::LEFT_TOP, when, theme::semibold(14.0), theme::text_dim());
++    if name.is_empty() {
++        // Not signed in and no name set: ask for one instead of greeting a stranger by it.
++        let hint = "Set your name in Settings";
++        let font = theme::semibold(14.0);
++        let size = ui.painter().layout_no_wrap(hint.to_owned(), font.clone(), theme::text_dim()).size();
++        let at = pos2(when_r.right() + 16.0, when_r.top());
++        let r = Rect::from_min_size(at, size);
++        let resp = ui.interact(r.expand2(vec2(6.0, 4.0)), egui::Id::new("hero-set-name"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
++        let col = if resp.hovered() { theme::text() } else { theme::text_dim() };
++        ui.painter().text(pos2(when_r.right() + 7.0, when_r.top()), Align2::LEFT_TOP, "·", font.clone(), theme::text_dim());
++        ui.painter().text(at, Align2::LEFT_TOP, hint, font, col);
++        if resp.hovered() {
++            ui.painter().line_segment([pos2(r.left(), r.bottom() + 1.0), pos2(r.right(), r.bottom() + 1.0)], egui::Stroke::new(1.0, col));
++        }
++        if resp.clicked() {
++            app.actions.push(Action::Go(Page::Settings));
++        }
++    }
 +
 +    if ui.is_rect_visible(card) {
 +        if f < 1.0 && prev != idx {
@@ -3889,7 +3907,7 @@ index 28fc376..900e942 100644
              if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
                  // First in the menu, so unfolding it only ever adds rows below the ⋯:
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7..6bac12e 100644
+index 899a3c7..f92f889 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
 @@ -65,18 +65,28 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
@@ -4262,7 +4280,15 @@ index 899a3c7..6bac12e 100644
          setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
              toggle(ui, &mut app.reactive_bg, "Pulse with the music");
          });
-@@ -3511,10 +3725,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
+@@ -3499,7 +3713,6 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+             toggle(ui, &mut app.show_nerd_stats, "Stats for nerds");
+         });
+     });
+-    settings_lyrics(app, ui);
+ }
+ 
+ /// Settings › Window.
+@@ -3511,10 +3724,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.close_to_tray, "Close to tray");
          });
          divider(ui);
@@ -4273,7 +4299,7 @@ index 899a3c7..6bac12e 100644
          let api = crate::renderer::api_name();
          let title = format!("Draw with {api}");
          let desc = format!(
-@@ -3593,8 +3803,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3593,8 +3802,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
                      });
                  });
                  divider(ui);
@@ -4284,7 +4310,7 @@ index 899a3c7..6bac12e 100644
                  });
              }
          });
-@@ -3609,7 +3819,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3609,7 +3818,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
          let busy = app.lastfm_busy.load(Ordering::Relaxed);
          let desc = match &app.lastfm_user {
              Some(name) => format!("Scrobbling what you play to {name}'s profile."),
@@ -4293,7 +4319,7 @@ index 899a3c7..6bac12e 100644
              None => "Scrobble what you play to your Last.fm profile.".to_owned(),
          };
          let (mut connect, mut disconnect) = (false, false);
-@@ -3722,7 +3932,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3722,7 +3931,7 @@ fn network(app: &mut App, ui: &mut Ui) {
      use crate::proxy::{self, Setting};
      let same = |a: &Setting, b: &Setting| std::mem::discriminant(a) == std::mem::discriminant(b);
      let mut pick = None;
@@ -4302,7 +4328,7 @@ index 899a3c7..6bac12e 100644
          let btn = dropdown_button(ui, app.proxy_mode.label(), 220.0, "Proxy");
          egui::Popup::menu(&btn).show(|ui| {
              ui.set_width(220.0);
-@@ -3754,7 +3964,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3754,7 +3963,7 @@ fn network(app: &mut App, ui: &mut Ui) {
              divider(ui);
              let desc = match proxy::system() {
                  Some(p) => format!("Windows is set to use {}.", proxy::redact(&p)),
@@ -4311,7 +4337,7 @@ index 899a3c7..6bac12e 100644
              };
              setting_row(ui, "Windows proxy", Some(&desc), |_| {});
          }
-@@ -3844,7 +4054,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
+@@ -3844,7 +4053,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(220.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -4320,7 +4346,7 @@ index 899a3c7..6bac12e 100644
              ui.add_space(4.0);
              let mut row = |ui: &mut Ui, label: &str, value: &str| {
                  let on = current.eq_ignore_ascii_case(value);
-@@ -3907,7 +4117,7 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
+@@ -3907,7 +4116,7 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(340.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -4329,7 +4355,7 @@ index 899a3c7..6bac12e 100644
              ui.add_space(4.0);
              if option_row(ui, SYSTEM_DEFAULT, app.output_device.is_none()).clicked() {
                  pick = Some(None);
-@@ -3993,15 +4203,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
+@@ -3993,15 +4202,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
      if !s.shown {
          return;
      }
@@ -5246,7 +5272,7 @@ index c5555a8..2f6d5a5 100644
              // sizing (maximized), kept.
              let r = params.rgrc[0];
 diff --git a/src/ui/transfer.rs b/src/ui/transfer.rs
-index 821455d..4f8063d 100644
+index 821455d..24eb8aa 100644
 --- a/src/ui/transfer.rs
 +++ b/src/ui/transfer.rs
 @@ -279,7 +279,7 @@ fn setup(app: &mut App, ui: &mut Ui) {
@@ -5276,6 +5302,20 @@ index 821455d..4f8063d 100644
                      .id_salt(("xfer-cands", at))
                      .auto_shrink([false, false])
                      .min_scrolled_height(room)
+@@ -1419,6 +1419,13 @@ pub fn settings_section(app: &mut App, ui: &mut Ui) {
+         spotify_account_row(app, ui, &account, false);
+         super::pages::divider(ui);
+         token_login(app, ui, &account);
++        super::pages::divider(ui);
++        // The transfer itself lives under Library in the sidebar: this goes straight there.
++        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 54.0), Sense::hover());
++        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
++        if pill(&mut child, "Transfer playlists from Spotify", None, true).clicked() {
++            open = true;
++        }
+     });
+     if open {
+         app.actions.push(Action::Go(Page::Transfer));
 diff --git a/src/ui/widgets.rs b/src/ui/widgets.rs
 index f44bea1..1e7c4b8 100644
 --- a/src/ui/widgets.rs
