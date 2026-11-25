@@ -2180,10 +2180,10 @@ index bc4220d6..6b2305fa 100644
      Ok((builder.build()?, toggle))
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
-index 00000000..2379c6a7
+index 00000000..6cafc182
 --- /dev/null
 +++ b/src/ui/fx.rs
-@@ -0,0 +1,356 @@
+@@ -0,0 +1,492 @@
 +//! Small effects borrowed from Mochy Music: the wavy seek line, the like burst, the press
 +//! bounce, the visualizer beside the player, the staggered entrance of cards and the
 +//! greeting on Home. Everything is drawn with the painter calls the rest of the app
@@ -2540,6 +2540,142 @@ index 00000000..2379c6a7
 +    }
 +    k
 +}
++
++// ------------------------------------------------------------------ profile photo
++
++use super::{App, Page, shell, widgets};
++
++/// The picture the listener chose, a 256 px square kept in the data folder.
++fn photo_path(dir: &std::path::Path) -> std::path::PathBuf {
++    dir.join("profile.png")
++}
++
++/// Asks for a picture (in a thread, so the window keeps going), crops it to a centred
++/// square and keeps it as the profile photo.
++pub fn pick_photo(dir: &std::path::Path) {
++    let dir = dir.to_owned();
++    std::thread::spawn(move || {
++        let Some(file) = rfd::FileDialog::new().set_title("Choose a profile photo").add_filter("Image", &["png", "jpg", "jpeg", "webp", "bmp"]).pick_file() else { return };
++        let Ok(img) = image::open(&file) else { return };
++        let side = img.width().min(img.height());
++        if side == 0 {
++            return;
++        }
++        let square = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side);
++        let _ = square.resize_exact(256, 256, image::imageops::FilterType::Lanczos3).save(photo_path(&dir));
++    });
++}
++
++/// Back to the account's own picture.
++pub fn clear_photo(dir: &std::path::Path) {
++    let _ = std::fs::remove_file(photo_path(dir));
++}
++
++/// Whether a photo of the listener's own is set.
++pub fn has_photo(dir: &std::path::Path) -> bool {
++    photo_path(dir).exists()
++}
++
++type PhotoCache = (Option<egui::TextureHandle>, f64, Option<std::time::SystemTime>);
++
++/// The chosen photo as a texture, re-read when the file changes (looked at once a second).
++fn photo_texture(ctx: &Context, dir: &std::path::Path) -> Option<egui::TextureHandle> {
++    let id = Id::new("fx-profile-photo");
++    let now = ctx.input(|i| i.time);
++    let (mut tex, mut checked, mut stamp) = ctx.data(|d| d.get_temp::<PhotoCache>(id)).unwrap_or((None, -10.0, None));
++    if now - checked > 1.0 {
++        checked = now;
++        let path = photo_path(dir);
++        let seen = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
++        if seen != stamp {
++            stamp = seen;
++            tex = seen.and_then(|_| image::open(&path).ok()).map(|img| {
++                let rgba = img.to_rgba8();
++                let size = [rgba.width() as usize, rgba.height() as usize];
++                ctx.load_texture("profile-photo", egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()), egui::TextureOptions::LINEAR)
++            });
++        }
++    }
++    ctx.data_mut(|d| d.insert_temp(id, (tex.clone(), checked, stamp)));
++    tex
++}
++
++/// The listener's round portrait: the photo they chose, else the signed-in account's own
++/// picture, else the mark on a dark disc.
++pub fn avatar(app: &App, ui: &Ui, rect: Rect) {
++    let r = (rect.width() / 2.0).min(127.0);
++    if let Some(tex) = photo_texture(ui.ctx(), app.backend.data_dir()) {
++        egui::Image::from_texture(egui::load::SizedTexture::new(tex.id(), rect.size())).corner_radius(egui::CornerRadius::same(r as u8)).paint_at(ui, rect);
++    } else if let Some(url) = app.account_avatar.as_ref().filter(|a| !a.is_empty()) {
++        widgets::paint_remote(ui, url, rect, r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
++    } else {
++        ui.painter().circle_filled(rect.center(), r, Color32::from_white_alpha(22));
++        shell::mark(ui, Rect::from_center_size(rect.center(), rect.size() * 0.6), Color32::WHITE);
++    }
++    ui.painter().circle_stroke(rect.center(), r - 0.5, egui::Stroke::new(1.0, Color32::from_white_alpha(34)));
++}
++
++// ------------------------------------------------------------------ pinned heads
++
++fn scrim(ui: &Ui, inner: Rect, ground: Color32, strength: f32) {
++    if strength <= 0.01 {
++        return;
++    }
++    let left = inner.left() - 32.0;
++    let r = Rect::from_min_max(pos2(left, inner.top()), pos2(inner.right() + 24.0, inner.top() + 84.0));
++    shell::vgradient(ui.painter(), r, theme::with_alpha(ground, strength), Color32::TRANSPARENT);
++}
++
++/// Called by Home with where its greeting row sits, for the pinned head below.
++pub fn note_greeting(ctx: &Context, top: f32) {
++    ctx.data_mut(|d| d.insert_temp(Id::new("fx-home-greet-top"), top));
++}
++
++/// Called by a playlist or album with its title, for the pinned head below.
++pub fn note_title(ctx: &Context, title: &str) {
++    ctx.data_mut(|d| d.insert_temp(Id::new("fx-pin-title"), title.to_owned()));
++}
++
++/// What stays at the top of a page once it has scrolled: on Home the mark that opens the
++/// page turns into the word "Home" and keeps its place; a playlist or album keeps its title.
++/// Drawn over the page, with a soft fade under it so the rows slide away beneath.
++pub fn pinned_head(app: &App, ui: &mut Ui, page: &Page, inner: Rect, scroll_y: f32) {
++    let ctx = ui.ctx().clone();
++    let ground = shell::page_ground(app);
++    let left = inner.left() + 2.0;
++    match page {
++        Page::Home => {
++            let Some(top) = ctx.data(|d| d.get_temp::<f32>(Id::new("fx-home-greet-top"))) else { return };
++            let k = theme::ease_out((scroll_y / 70.0).clamp(0.0, 1.0));
++            scrim(ui, inner, ground, k * 0.96);
++            // At rest the mark sits where the page's first row begins; scrolled, it has
++            // floated up to the top and become the page's name.
++            // `top` is already where the row sits on screen, so it rides up with the page
++            // until it reaches the pinned height.
++            let rest_y = top + 38.0;
++            let pin_y = inner.top() + 30.0;
++            let cy = rest_y.max(pin_y);
++            let side = 52.0 * (1.0 - 0.25 * k);
++            if k < 0.99 {
++                shell::mark(ui, Rect::from_center_size(pos2(left + 26.0, cy), vec2(side, side)), Color32::from_white_alpha((235.0 * (1.0 - k)) as u8));
++            }
++            if k > 0.01 {
++                ui.painter().text(pos2(left + 2.0 + 6.0 * (1.0 - k), cy), egui::Align2::LEFT_CENTER, "Home", theme::bold(30.0), theme::with_alpha(theme::text(), k));
++            }
++        }
++        Page::Album(_) | Page::Playlist(_) => {
++            let k = ((scroll_y - 210.0) / 60.0).clamp(0.0, 1.0);
++            if k <= 0.0 {
++                return;
++            }
++            let Some(title) = ctx.data(|d| d.get_temp::<String>(Id::new("fx-pin-title"))) else { return };
++            scrim(ui, inner, ground, k * 0.96);
++            let rise = 8.0 * (1.0 - k);
++            ui.painter().text(pos2(left, inner.top() + 28.0 + rise), egui::Align2::LEFT_CENTER, title, theme::bold(24.0), theme::with_alpha(theme::text(), k));
++        }
++        _ => {}
++    }
++}
 diff --git a/src/ui/glyphs.rs b/src/ui/glyphs.rs
 index 288ad8c7..4696a38d 100644
 --- a/src/ui/glyphs.rs
@@ -2633,10 +2769,10 @@ index 288ad8c7..4696a38d 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 00000000..00d4bba9
+index 00000000..0a30c483
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,453 @@
+@@ -0,0 +1,455 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! One wide card at the top of Home. It stands on a heavily softened copy of the cover
@@ -2956,10 +3092,12 @@ index 00000000..00d4bba9
 +    let (hh, mm, wd, dd, mo) = fx::local_clock();
 +    let name = who(app);
 +    let title = if name.is_empty() { fx::greeting(hh).to_owned() } else { format!("{}, {}", fx::greeting(hh), name) };
-+    ui.painter().text(pos2(greet.left() + 2.0, greet.top() + 6.0), Align2::LEFT_TOP, &title, theme::bold(34.0), theme::text());
++    // At the right, flush to the edge: the left is the mark's (see `fx::pinned_head`).
++    fx::note_greeting(&ctx, greet.top());
++    ui.painter().text(pos2(greet.right() - 2.0, greet.top() + 6.0), Align2::RIGHT_TOP, &title, theme::bold(34.0), theme::text());
 +    let (h12, ampm) = (if hh % 12 == 0 { 12 } else { hh % 12 }, if hh < 12 { "AM" } else { "PM" });
 +    let when = format!("{}, {} {} · {}:{:02} {}", fx::DAYS[wd % 7], fx::MONTHS[(mo as usize).saturating_sub(1).min(11)], dd, h12, mm, ampm);
-+    ui.painter().text(pos2(greet.left() + 3.0, greet.top() + 50.0), Align2::LEFT_TOP, when, theme::semibold(14.0), theme::text_dim());
++    ui.painter().text(pos2(greet.right() - 3.0, greet.top() + 50.0), Align2::RIGHT_TOP, when, theme::semibold(14.0), theme::text_dim());
 +
 +    if ui.is_rect_visible(card) {
 +        if f < 1.0 && prev != idx {
@@ -3708,7 +3846,7 @@ index 28fc3762..7875e0d4 100644
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7a..c5ad8d88 100644
+index 899a3c7a..c63db68c 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
 @@ -65,6 +65,8 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
@@ -3720,7 +3858,16 @@ index 899a3c7a..c5ad8d88 100644
      let page = app.page.clone();
      // Each page (each album, each search) keeps its own scroll position.
      let mut area = egui::ScrollArea::vertical().id_salt(("page", &page)).auto_shrink(false);
-@@ -77,6 +79,10 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+@@ -72,11 +74,19 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+     if let Some(y) = super::dev_var("YTM_SCROLL").and_then(|v| v.parse::<f32>().ok()) {
+         area = area.vertical_scroll_offset(y);
+     }
++    // The search box and its chips stand above the page's scroll, so they stay put.
++    if let Page::Search(q) = &page {
++        search_head(app, ui, q);
++    }
+     let out = area.show(ui, |ui| {
+         // The panel reaches the window's side so egui's own bar sits flush with it; the
          // content keeps its measured right edge instead of following the panel.
          ui.set_max_width((ui.available_width() - 48.0).max(0.0));
          ui.add_space(18.0 * (1.0 - t));
@@ -3731,16 +3878,20 @@ index 899a3c7a..c5ad8d88 100644
          match &page {
              Page::Home => home(app, ui, now),
              Page::New => new(app, ui, now),
-@@ -91,7 +97,7 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+@@ -91,8 +101,11 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
              Page::Transfer => super::transfer::page(app, ui, now),
          }
          // Room to scroll the last rows clear of the player's frosted strip.
 -        ui.add_space(96.0);
 +        ui.add_space(96.0 + 24.0);
      });
++    // What stays at the top as the page scrolls (Home's mark turning into its name, a
++    // playlist's title).
++    super::fx::pinned_head(app, ui, &page, out.inner_rect, out.state.offset.y);
      selection_bar(app, ui.ctx(), &page, out.inner_rect);
      // Infinite scroll on home: fetch the next shelves when nearing the bottom.
-@@ -770,12 +776,17 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
+     if page == Page::Home {
+@@ -770,12 +783,17 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
  // ------------------------------------------------------------------ home
  
  fn home(app: &mut App, ui: &mut Ui, now: f64) {
@@ -3759,7 +3910,43 @@ index 899a3c7a..c5ad8d88 100644
      // Apple's Home has no banner: its lead shelf is a run of portrait tiles, and every
      // shelf after it takes the shape its own cards ask for.
      let rows = Rows::new(app, now);
-@@ -1539,12 +1550,17 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
+@@ -1273,18 +1291,18 @@ pub(super) fn page_title(ui: &mut Ui, title: &str) {
+ 
+ // ------------------------------------------------------------------ search
+ 
+-fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
+-    let pick = super::transfer::pick_banner(app, ui);
++/// The top of the Search page, outside its scroll: the box and the Online / In Library
++/// chips. The box stands in for the page's title; what scrolls under it is what was opened
++/// lately, then the coloured category bricks, then the results.
++fn search_head(app: &mut App, ui: &mut Ui, q: &str) {
+     // Coming from a suggestion, the sidebar or a link, the field says what's shown.
+     // Only when the route changed: clearing the box leaves the route alone until Enter.
+     if app.search_synced != q {
+         app.search_synced = q.to_owned();
+         app.search_text = q.trim().to_owned();
+     }
+-    // The box stands in for this page's title, exactly where Apple puts it; what sits
+-    // under it is what was opened lately, then the coloured category bricks.
+     ui.add_space(18.0);
+-    let w = ui.available_width();
++    let w = (ui.available_width() - 48.0).max(0.0);
+     super::shell::search_field(app, ui, w);
+     ui.add_space(8.0);
+     ui.horizontal(|ui| {
+@@ -1296,6 +1314,11 @@ fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
+             app.search_library_only = true;
+         }
+     });
++    ui.add_space(8.0);
++}
++
++fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
++    let pick = super::transfer::pick_banner(app, ui);
+ 
+     if app.search_library_only {
+         let q_input = app.search_text.trim();
+@@ -1539,12 +1562,17 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
          app.backend.request(crate::backend::Req::PageArt { key: id.to_owned(), url: cover });
      }
      if held {
@@ -3781,7 +3968,15 @@ index 899a3c7a..c5ad8d88 100644
      }
      // The header's motion sleeve, asked for before the release is borrowed below.
      // Albums only: playlist covers stay still.
-@@ -2761,6 +2777,8 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
+@@ -1552,6 +1580,7 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
+         Some(o) => (o.c.title.clone(), o.c.artists.first().map(|a| a.name.clone()).unwrap_or_else(|| o.c.byline())),
+         None => (String::new(), String::new()),
+     };
++    super::fx::note_title(ui.ctx(), &release);
+     // The header keeps its still sleeve: moving artwork belongs to the player.
+     let sprite: Option<widgets::MotionSprite> = None;
+     let accent = app.accent_color();
+@@ -2761,6 +2790,8 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
      }
      page_title(ui, "Settings");
      settings_search_bar(ui, &mut app.settings_search);
@@ -3790,7 +3985,7 @@ index 899a3c7a..c5ad8d88 100644
      settings_account(app, ui);
      settings_playback(app, ui);
      settings_hires(app, ui);
-@@ -2776,6 +2794,166 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
+@@ -2776,6 +2807,177 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
      settings_card(ui, |ui| network(app, ui));
      super::transfer::settings_section(app, ui);
      settings_shortcuts(app, ui);
@@ -3834,8 +4029,7 @@ index 899a3c7a..c5ad8d88 100644
 +            // The mark and the name.
 +            let (head, _) = ui.allocate_exact_size(vec2(w, 64.0), Sense::hover());
 +            let disc = Rect::from_min_size(head.min, vec2(64.0, 64.0));
-+            ui.painter().circle_filled(disc.center(), 32.0, egui::Color32::from_white_alpha(16));
-+            super::shell::mark(ui, Rect::from_center_size(disc.center(), vec2(38.0, 38.0)), egui::Color32::WHITE);
++            super::fx::avatar(app, ui, disc);
 +            ui.painter().text(pos2(disc.right() + 16.0, head.center().y - 11.0), Align2::LEFT_CENTER, &shown_name, theme::bold(26.0), theme::text());
 +            let sub = match &app.account_name {
 +                Some(n) if app.logged_in => format!("Signed in as {n}"),
@@ -3861,6 +4055,18 @@ index 899a3c7a..c5ad8d88 100644
 +                ui.label(RichText::new("Name on Home").font(theme::semibold(13.5)).color(theme::text_dim()));
 +                ui.add_space(6.0);
 +                settings_field(ui, &mut app.display_name, "Your name", 24);
++            });
++            ui.add_space(10.0);
++            // The portrait: the account's own picture unless one is chosen here.
++            ui.horizontal(|ui| {
++                ui.label(RichText::new("Profile photo").font(theme::semibold(13.5)).color(theme::text_dim()));
++                ui.add_space(6.0);
++                if widgets::pill(ui, "Choose photo", Some(icon::UPLOAD), false).clicked() {
++                    super::fx::pick_photo(app.backend.data_dir());
++                }
++                if super::fx::has_photo(app.backend.data_dir()) && widgets::pill(ui, "Use account photo", None, false).clicked() {
++                    super::fx::clear_photo(app.backend.data_dir());
++                }
 +            });
 +        });
 +}
@@ -3957,7 +4163,7 @@ index 899a3c7a..c5ad8d88 100644
  }
  
  /// The box above Settings: what's typed in it leaves only the sections and rows that say
-@@ -2936,7 +3114,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
+@@ -2936,7 +3138,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
              }
          });
          divider(ui);
@@ -3966,7 +4172,7 @@ index 899a3c7a..c5ad8d88 100644
              output_device_picker(app, ui);
          });
          divider(ui);
-@@ -2999,7 +3177,7 @@ fn settings_equalizer(app: &mut App, ui: &mut Ui) {
+@@ -2999,7 +3201,7 @@ fn settings_equalizer(app: &mut App, ui: &mut Ui) {
      section_label(ui, "Equalizer", None);
      ui.add_space(4.0);
      settings_card(ui, |ui| {
@@ -3975,7 +4181,7 @@ index 899a3c7a..c5ad8d88 100644
              if toggle(ui, &mut app.eq_on, "Equalizer").changed() {
                  app.set_eq();
              }
-@@ -3491,6 +3669,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3491,6 +3693,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.anim_bg, "Animated background");
          });
          divider(ui);
@@ -3990,7 +4196,7 @@ index 899a3c7a..c5ad8d88 100644
          setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
              toggle(ui, &mut app.reactive_bg, "Pulse with the music");
          });
-@@ -3511,10 +3697,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
+@@ -3511,10 +3721,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.close_to_tray, "Close to tray");
          });
          divider(ui);
@@ -4001,7 +4207,7 @@ index 899a3c7a..c5ad8d88 100644
          let api = crate::renderer::api_name();
          let title = format!("Draw with {api}");
          let desc = format!(
-@@ -3593,8 +3775,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3593,8 +3799,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
                      });
                  });
                  divider(ui);
@@ -4012,7 +4218,7 @@ index 899a3c7a..c5ad8d88 100644
                  });
              }
          });
-@@ -3609,7 +3791,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3609,7 +3815,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
          let busy = app.lastfm_busy.load(Ordering::Relaxed);
          let desc = match &app.lastfm_user {
              Some(name) => format!("Scrobbling what you play to {name}'s profile."),
@@ -4021,7 +4227,7 @@ index 899a3c7a..c5ad8d88 100644
              None => "Scrobble what you play to your Last.fm profile.".to_owned(),
          };
          let (mut connect, mut disconnect) = (false, false);
-@@ -3722,7 +3904,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3722,7 +3928,7 @@ fn network(app: &mut App, ui: &mut Ui) {
      use crate::proxy::{self, Setting};
      let same = |a: &Setting, b: &Setting| std::mem::discriminant(a) == std::mem::discriminant(b);
      let mut pick = None;
@@ -4030,7 +4236,7 @@ index 899a3c7a..c5ad8d88 100644
          let btn = dropdown_button(ui, app.proxy_mode.label(), 220.0, "Proxy");
          egui::Popup::menu(&btn).show(|ui| {
              ui.set_width(220.0);
-@@ -3754,7 +3936,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3754,7 +3960,7 @@ fn network(app: &mut App, ui: &mut Ui) {
              divider(ui);
              let desc = match proxy::system() {
                  Some(p) => format!("Windows is set to use {}.", proxy::redact(&p)),
@@ -4039,7 +4245,7 @@ index 899a3c7a..c5ad8d88 100644
              };
              setting_row(ui, "Windows proxy", Some(&desc), |_| {});
          }
-@@ -3993,15 +4175,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
+@@ -3993,15 +4199,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
      if !s.shown {
          return;
      }
@@ -4471,10 +4677,10 @@ index 00000000..80bdf75c
 +}
 diff --git a/src/ui/tabbar.rs b/src/ui/tabbar.rs
 new file mode 100644
-index 00000000..adc2a694
+index 00000000..0893ccbf
 --- /dev/null
 +++ b/src/ui/tabbar.rs
-@@ -0,0 +1,359 @@
+@@ -0,0 +1,361 @@
 +//! The floating tab bar, after Mochy Music's Android navigation bar.
 +//!
 +//! A stadium of dark frosted glass hung above the player. One glyph per tab, outline
@@ -4586,16 +4792,18 @@ index 00000000..adc2a694
 +    logo(app, ctx, screen);
 +}
 +
-+/// The mark, flat at the window's bottom left beside the player; a tap goes home.
++/// The listener's portrait, round at the window's bottom left beside the player; a tap
++/// opens Settings, where the profile (name, photo) is changed.
 +fn logo(app: &mut App, ctx: &egui::Context, screen: Rect) {
 +    let cell = Rect::from_center_size(pos2(screen.left() + EDGE + W / 2.0, screen.bottom() - 46.0), vec2(W, 52.0));
 +    egui::Area::new(egui::Id::new("tab-bar-logo-area")).fixed_pos(cell.min).order(egui::Order::Middle).show(ctx, |ui| {
 +        let (rect, resp) = ui.allocate_exact_size(cell.size(), Sense::click());
 +        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
 +        let glow = theme::anim_bool(ui.ctx(), "tab-bar-logo-h", resp.hovered(), 0.15);
-+        shell::mark(ui, Rect::from_center_size(rect.center(), vec2(38.0, 38.0)), egui::Color32::from_white_alpha((200.0 + 55.0 * glow) as u8));
++        let size = 40.0 + 3.0 * glow;
++        super::fx::avatar(app, ui, Rect::from_center_size(rect.center(), vec2(size, size)));
 +        if resp.clicked() {
-+            app.actions.push(Action::Go(Page::Home));
++            app.actions.push(Action::Go(Page::Settings));
 +        }
 +    });
 +}
