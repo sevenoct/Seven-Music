@@ -3973,7 +3973,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..a9a734d 100644
+index 28fc376..c9bb6fd 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -296,10 +296,22 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
@@ -4263,8 +4263,8 @@ index 28fc376..a9a734d 100644
 +    // Minimal: the transport's row, then the volume, then the song's three buttons (best
 +    // part, star, menu) centred under both. `ty_new` is the transport's centre line.
 +    let icon_mid = side * 0.088;
-+    let ty_new = (info_y + 62.0 + 40.0 + icon_mid * 0.6).min(col.bottom() - 110.0 - icon_mid * 0.5);
-+    let btn_y = ty_new + icon_mid * 0.5 + 86.0;
++    let ty_new = (info_y + 72.0 + 48.0 + icon_mid * 0.6).min(col.bottom() - 125.0 - icon_mid * 0.5);
++    let btn_y = ty_new + icon_mid * 0.5 + 98.0;
 +    let ctl = |old_dx: f32, new_dx: f32| if old { pos2(art.right() + old_dx, info_y + 14.0) } else { pos2(art.center().x + new_dx, btn_y) };
      // Apple keeps "(Explicit)" out of the name and wears it as a small colour-synced square
      // after the title instead.
@@ -4288,7 +4288,7 @@ index 28fc376..a9a734d 100644
      let line_w = text_w;
 -    let line_rect = widgets::linked_text(ui, pos2(x0, info_y + 21.0), &line, &track.artists, theme::semibold(15.0), theme::text_dim(), line_w, &mut app.actions);
 +    let line_x = if old { x0 } else { art.center().x - widgets::galley(ui, &line, theme::semibold(15.0), theme::text_dim(), line_w).size().x / 2.0 };
-+    let line_rect = widgets::linked_text(ui, pos2(line_x, info_y + 21.0), &line, &track.artists, theme::semibold(15.0), theme::text_dim(), line_w, &mut app.actions);
++    let line_rect = widgets::linked_text(ui, pos2(line_x, info_y + if old { 21.0 } else { 26.0 }), &line, &track.artists, theme::semibold(15.0), theme::text_dim(), line_w, &mut app.actions);
      // The album after the em dash opens its page too, underlined like the artists.
      if let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty())
          && let Some(id) = album.id.clone()
@@ -4345,12 +4345,12 @@ index 28fc376..a9a734d 100644
      // skips a little under a quarter of the side out from the play button.
 -    let icons = [0.038f32, 0.055, 0.075, 0.055, 0.038].map(|f| side * f);
 +    // The minimal player's play and skips share one size, the outer marks a touch larger than before.
-+    let icons = if old { [0.038f32, 0.055, 0.075, 0.055, 0.038] } else { [0.046f32, 0.088, 0.088, 0.088, 0.046] }.map(|f| side * f);
++    let icons = if old { [0.038f32, 0.055, 0.075, 0.055, 0.038] } else { [0.062f32, 0.088, 0.088, 0.088, 0.062] }.map(|f| side * f);
      let sizes = icons.map(|s| s * 1.42);
 -    let hit = Rect::from_min_size(pos2(x0, info_y + 46.0), vec2(w, 16.0));
 +    // Minimal: the times stand either side of the bar, so the bar is shorter by their room.
 +    let (bx0, bw) = if old { (x0, w) } else { (x0 + 46.0, w - 92.0) };
-+    let hit = Rect::from_min_size(pos2(bx0, info_y + if old { 46.0 } else { 54.0 }), vec2(bw, 16.0));
++    let hit = Rect::from_min_size(pos2(bx0, info_y + if old { 46.0 } else { 64.0 }), vec2(bw, 16.0));
      let sy = hit.center().y;
      // Far enough under the bar for the quality mark's box to clear it: the mark stands on
      // this line, and the box that holds it reaches above the words.
@@ -4425,7 +4425,7 @@ index 28fc376..a9a734d 100644
      // The marks are primary white, an off shuffle or repeat tertiary; a pressed button
      // shrinks to 90%, as the reference's does.
      let ink = |h: f32, base: f32, on: f32| theme::with_alpha(theme::lerp_color(theme::with_alpha(Color32::WHITE, base), Color32::WHITE, h), on);
-@@ -1023,7 +1160,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1023,26 +1160,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -4434,11 +4434,12 @@ index 28fc376..a9a734d 100644
          }
          (resp, h, p)
      };
-@@ -1031,18 +1168,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+     let (r, h, p) = btn(ui, 0, "shuffle", "Shuffle", true);
      let shuffled = app.queue.shuffled;
      let son = theme::anim_bool(ui.ctx(), r.id.with("on"), shuffled, 0.25);
-     let mark = lit_mark(app, son, ink(h, 0.55, 1.0));
+-    let mark = lit_mark(app, son, ink(h, 0.55, 1.0));
 -    super::glyphs::draw(ui, r.rect.center(), icons[0] * (1.0 - 0.1 * p), super::glyphs::SHUFFLE, mark);
++    let mark = lit_mark(app, son, ink(h, if old { 0.55 } else { 0.42 }, 1.0));
 +    super::glyphs::draw(ui, r.rect.center(), icons[0] * (1.0 - 0.15 * p), super::glyphs::SHUFFLE, mark);
      if r.clicked() {
          app.toggle_shuffle();
@@ -4465,11 +4466,13 @@ index 28fc376..a9a734d 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1077,7 +1214,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1076,8 +1213,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+     let looping = app.queue.repeat != Repeat::Off;
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
-     let mark = lit_mark(app, ron, ink(h, 0.55, 1.0));
+-    let mark = lit_mark(app, ron, ink(h, 0.55, 1.0));
 -    super::glyphs::draw(ui, r.rect.center(), icons[4] * (1.0 - 0.1 * p), repeat_glyph, mark);
++    let mark = lit_mark(app, ron, ink(h, if old { 0.55 } else { 0.42 }, 1.0));
 +    super::glyphs::draw(ui, r.rect.center(), icons[4] * (1.0 - 0.15 * p), repeat_glyph, mark);
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
@@ -4480,7 +4483,7 @@ index 28fc376..a9a734d 100644
      }
 +    // Minimal: the volume stands under the transport, always in view.
 +    if !old && app.show_volume {
-+        let vr = Rect::from_min_size(pos2(art.center().x - w * 0.25 - 38.0, ty + icons[2] * 0.5 + 30.0), vec2(w * 0.5 + 42.0, 28.0));
++        let vr = Rect::from_min_size(pos2(art.center().x - w * 0.25 - 30.0, ty + icons[2] * 0.5 + 38.0), vec2(w * 0.5 + 42.0, 28.0));
 +        volume_bar(app, ui, vr);
 +    }
  }
