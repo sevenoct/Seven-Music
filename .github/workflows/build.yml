@@ -1,15 +1,12 @@
-name: Build Seven (Windows)
+name: build
 
-on:
-  push:
-  workflow_dispatch:
+on: push
 
 env:
-  # The patch file in this repo's root. Change only if you rename it.
   PATCH: seven.patch
-  # BitChord PC at the commit the patch was written against.
-  BITCHORD_REPO: jackychan4891/BitChord-PC-Official
-  BITCHORD_REF: 7ed3e48450d8c51b76c1b429855079e515a4e723
+  # The BitChord source this app is built from (commit 7ed3e48), kept in this repo as one zip
+  # so the build no longer depends on another repository staying online.
+  BASE: base-src.zip
 
 jobs:
   build:
@@ -18,23 +15,23 @@ jobs:
       - name: Disable CRLF conversion
         run: git config --global core.autocrlf false
 
-      # This repository (whatever it is called): holds the patch.
-      - uses: actions/checkout@v5
+      - name: Checkout this repository
+        uses: actions/checkout@v5
         with:
           path: mine
 
-      # BitChord PC, untouched.
-      - uses: actions/checkout@v5
-        with:
-          repository: ${{ env.BITCHORD_REPO }}
-          ref: ${{ env.BITCHORD_REF }}
-          path: src
+      - name: Unpack the base source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path src | Out-Null
+          Expand-Archive -Path "mine/$env:BASE" -DestinationPath src -Force
 
       - name: Apply patch
         shell: bash
         run: |
           cd src
-          git apply --whitespace=nowarn ../mine/${{ env.PATCH }}
+          git init -q
+          git apply --whitespace=nowarn "../mine/$PATCH"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -46,22 +43,19 @@ jobs:
         working-directory: src
         run: cargo build --release --locked
 
-      # webview2-com-sys extracts WebView2Loader.dll into its build OUT_DIR, not next to
-      # the exe. Seven.exe needs it beside it.
-      - name: Stage Seven
-        working-directory: src
+      - name: Collect
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path ..\dist | Out-Null
-          Copy-Item target\release\bitchord.exe ..\dist\Seven.exe -Force
-          $dll = Get-ChildItem -Path "target\release\build\*\out\x64\WebView2Loader.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $dll) { $dll = Get-ChildItem -Path "$HOME\.cargo\registry\src\*\webview2-com-sys-*\x64\WebView2Loader.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 }
-          if (-not $dll) { Write-Error "WebView2Loader.dll (x64) not found"; exit 1 }
-          Copy-Item $dll.FullName ..\dist\WebView2Loader.dll -Force
-          Get-ChildItem ..\dist
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item src/target/release/bitchord.exe dist/Seven.exe
+          $dll = Get-ChildItem -Path src/target/release -Recurse -Filter WebView2Loader.dll -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+          if (-not $dll) {
+            $dll = Get-ChildItem -Path src/target/release -Recurse -Filter WebView2Loader.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if ($dll) { Copy-Item $dll.FullName dist/WebView2Loader.dll } else { Write-Warning "WebView2Loader.dll not found" }
 
       - uses: actions/upload-artifact@v4
         with:
           name: Seven-windows
           path: dist/*
-          if-no-files-found: error
