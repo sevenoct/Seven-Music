@@ -3669,7 +3669,7 @@ index 249fb6f..b81defb 100644
              && (sresp.clicked() || sresp.dragged())
          {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..fceec2c 100644
+index 252e6b9..d1ca7cb 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,9 @@ mod backdrop;
@@ -3881,7 +3881,7 @@ index 252e6b9..fceec2c 100644
  
          // The player keeps the window buttons too: the top right stays the window's.
 -        titlebar::window_buttons(&ctx);
-+        titlebar::window_buttons(&ctx, if self.np_open { fx::calm(&ctx) } else { 1.0 });
++        titlebar::window_buttons(&ctx, if self.np_open { fx::calm(&ctx) } else { titlebar::proximity(&ctx) });
          titlebar::resize_edges(&ctx);
          // Back from the mini player.
          self.mini.fade_in(&ctx, now, shell::base_color(self));
@@ -3973,7 +3973,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..40ac3d9 100644
+index 28fc376..92d6082 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -296,10 +296,22 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
@@ -4301,6 +4301,8 @@ index 28fc376..40ac3d9 100644
      let icons = [0.038f32, 0.055, 0.075, 0.055, 0.038].map(|f| side * f);
      let sizes = icons.map(|s| s * 1.42);
 -    let hit = Rect::from_min_size(pos2(x0, info_y + 46.0), vec2(w, 16.0));
++    // Minimal: the times stand either side of the bar, so the bar is shorter by their room.
++    let (bx0, bw) = if old { (x0, w) } else { (x0 + 46.0, w - 92.0) };
 +    let hit = Rect::from_min_size(pos2(bx0, info_y + 46.0), vec2(bw, 16.0));
      let sy = hit.center().y;
      // Far enough under the bar for the quality mark's box to clear it: the mark stands on
@@ -4308,8 +4310,6 @@ index 28fc376..40ac3d9 100644
      let times_y = sy + 18.0;
 -    let ty = (times_y + icons[2]).min(col.bottom() - 26.0 - icons[2] * 1.5);
 +    let ty = if old { (times_y + icons[2]).min(col.bottom() - 26.0 - icons[2] * 1.5) } else { (sy + 30.0 + icons[2] * 0.6).min(col.bottom() - 70.0 - icons[2] * 1.5) };
-+    // Minimal: the times stand either side of the bar, so the bar is shorter by their room.
-+    let (bx0, bw) = if old { (x0, w) } else { (x0 + 46.0, w - 92.0) };
      // Held for the handoff's first half: its last stretch is where the pointer is,
      // and seeking the queue's song from here would cut the mix.
      let sresp = ui.interact(hit, ui.scope_id().with("np-seek"), if held { Sense::hover() } else { Sense::click_and_drag() });
@@ -5857,17 +5857,24 @@ index 0000000..343c4c7
 +    }
 +}
 diff --git a/src/ui/titlebar.rs b/src/ui/titlebar.rs
-index c5555a8..f4b5621 100644
+index c5555a8..49e3397 100644
 --- a/src/ui/titlebar.rs
 +++ b/src/ui/titlebar.rs
-@@ -112,11 +112,13 @@ pub fn drag_strip(ui: &Ui, rect: Rect, id: &str, avoid: &[Rect]) -> egui::Respon
+@@ -112,11 +112,20 @@ pub fn drag_strip(ui: &Ui, rect: Rect, id: &str, avoid: &[Rect]) -> egui::Respon
      resp
  }
  
 -/// Minimize, maximize or restore, and close, at the window's top right.
 -pub fn window_buttons(ctx: &egui::Context) {
-+/// Minimize, maximize or restore, and close, at the window's top right. `fade` is 1 in
-+/// general; the big player lowers it with its other controls while the pointer rests.
++/// Outside the player the window buttons stay out of sight: 0 from the moment the app
++/// opens, 1 while the pointer is near them (or on them), easing in and out.
++pub fn proximity(ctx: &egui::Context) -> f32 {
++    let near = buttons_rect(ctx).is_some_and(|r| ctx.pointer_latest_pos().is_some_and(|p| r.expand2(vec2(48.0, 32.0)).contains(p)));
++    ctx.animate_bool_with_time(Id::new("window-buttons-near"), near, 0.18)
++}
++
++/// Minimize, maximize or restore, and close, at the window's top right. `fade` comes from
++/// `proximity` outside the player and from its idle fade inside it.
 +pub fn window_buttons(ctx: &egui::Context, fade: f32) {
      let Some(rect) = buttons_rect(ctx) else { return };
      let max = maximized(ctx);
@@ -5876,7 +5883,7 @@ index c5555a8..f4b5621 100644
          let kinds = [(Kind::Minimize, "Minimize"), (if max { Kind::Restore } else { Kind::Maximize }, if max { "Restore" } else { "Maximize" }), (Kind::Close, "Close")];
          for (i, (kind, name)) in kinds.into_iter().enumerate() {
              let r = Rect::from_min_size(rect.min + vec2(i as f32 * BUTTON_W, 0.0), vec2(BUTTON_W, HEIGHT));
-@@ -126,7 +128,8 @@ pub fn window_buttons(ctx: &egui::Context) {
+@@ -126,7 +135,8 @@ pub fn window_buttons(ctx: &egui::Context) {
              if resp.has_focus() {
                  ui.painter().rect_stroke(r.shrink(3.0), 3.0, Stroke::new(1.5, theme::text()), egui::StrokeKind::Inside);
              }
@@ -5886,7 +5893,7 @@ index c5555a8..f4b5621 100644
                  ctx.send_viewport_cmd(match kind {
                      Kind::Minimize => ViewportCommand::Minimized(true),
                      Kind::Maximize => ViewportCommand::Maximized(true),
-@@ -263,11 +266,12 @@ mod frame {
+@@ -263,11 +273,12 @@ mod frame {
      use windows::Win32::Graphics::Dwm::{
          DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
          DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
@@ -5901,7 +5908,7 @@ index c5555a8..f4b5621 100644
  
      pub fn init(hwnd: *mut std::ffi::c_void) {
          let hwnd = HWND(hwnd);
-@@ -294,6 +298,15 @@ mod frame {
+@@ -294,6 +305,15 @@ mod frame {
                  &corner as *const DWM_WINDOW_CORNER_PREFERENCE as *const _,
                  std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32,
              );
@@ -5917,7 +5924,7 @@ index c5555a8..f4b5621 100644
              // Have Windows ask for the window's areas again.
              let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
          }
-@@ -310,12 +323,48 @@ mod frame {
+@@ -310,12 +330,48 @@ mod frame {
                  let _ = DefSubclassProc(hwnd, msg, wparam, lparam);
                  return LRESULT(0);
              }
