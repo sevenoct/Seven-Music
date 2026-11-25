@@ -3846,7 +3846,7 @@ index 28fc3762..7875e0d4 100644
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7a..c63db68c 100644
+index 899a3c7a..b31a64d1 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
 @@ -65,6 +65,8 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
@@ -3887,7 +3887,7 @@ index 899a3c7a..c63db68c 100644
      });
 +    // What stays at the top as the page scrolls (Home's mark turning into its name, a
 +    // playlist's title).
-+    super::fx::pinned_head(app, ui, &page, out.inner_rect, out.state.offset.y);
++    super::fx::pinned_head(app, ui, &page, out.inner_rect, out.state.clamped_offset().y);
      selection_bar(app, ui.ctx(), &page, out.inner_rect);
      // Infinite scroll on home: fetch the next shelves when nearing the bottom.
      if page == Page::Home {
