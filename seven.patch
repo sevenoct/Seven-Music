@@ -2180,10 +2180,10 @@ index bc4220d6..6b2305fa 100644
      Ok((builder.build()?, toggle))
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
-index 00000000..edfc344b
+index 00000000..2379c6a7
 --- /dev/null
 +++ b/src/ui/fx.rs
-@@ -0,0 +1,303 @@
+@@ -0,0 +1,356 @@
 +//! Small effects borrowed from Mochy Music: the wavy seek line, the like burst, the press
 +//! bounce, the visualizer beside the player, the staggered entrance of cards and the
 +//! greeting on Home. Everything is drawn with the painter calls the rest of the app
@@ -2200,6 +2200,7 @@ index 00000000..edfc344b
 +/// the line stays straight. The wave starts and ends flat so it meets the knob cleanly.
 +/// The caller draws the knob; `gap` is the room to leave for it on either side.
 +#[allow(clippy::too_many_arguments)]
++#[allow(dead_code)]
 +pub fn wave(ui: &Ui, x0: f32, x1: f32, cy: f32, thick: f32, frac: f32, active: Color32, rest: Color32, gap: f32, amp: f32, time: f64) {
 +    let p = ui.painter();
 +    let frac = frac.clamp(0.0, 1.0);
@@ -2486,6 +2487,58 @@ index 00000000..edfc344b
 +#[allow(dead_code)]
 +pub fn roomy(ui: &Ui) -> bool {
 +    ui.available_width() > 600.0
++}
++
++// ------------------------------------------------------------------ flat sliders
++
++/// Mochy's slider: a flat bar, the played part solid from the left, its end cut straight,
++/// and no knob. `track` is the whole line; `frac` how much of it is filled.
++pub fn flat_fill(ui: &Ui, track: Rect, frac: f32, color: Color32) {
++    let w = track.width() * frac.clamp(0.0, 1.0);
++    if w < 0.5 {
++        return;
++    }
++    let r = (track.height() / 2.0).round().clamp(0.0, 255.0) as u8;
++    let cr = egui::CornerRadius { nw: r, sw: r, ne: 0, se: 0 };
++    ui.painter().rect_filled(Rect::from_min_size(track.min, vec2(w, track.height())), cr, color);
++}
++
++// ------------------------------------------------------------------ rest
++
++/// How long the pointer may lie still before the big player's extras fade away.
++const REST_SECS: f64 = 3.0;
++
++/// 1 while the pointer has moved, pressed or scrolled lately (or a key was pressed), and
++/// 0 once it has rested for a few seconds: it falls away slowly and returns almost at
++/// once. The player scales its extra controls by this. Safe to ask more than once a frame.
++pub fn calm(ctx: &Context) -> f32 {
++    let id = Id::new("fx-calm");
++    let (now, dt) = ctx.input(|i| (i.time, i.stable_dt.min(0.1) as f64));
++    let (t_seen, mut k, mut last) = ctx.data(|d| d.get_temp::<(f64, f32, f64)>(id)).unwrap_or((-1.0, 1.0, now));
++    if t_seen == now {
++        return k;
++    }
++    let moved = ctx.input(|i| {
++        i.pointer.delta() != egui::Vec2::ZERO
++            || i.pointer.any_down()
++            || i.smooth_scroll_delta != egui::Vec2::ZERO
++            || i.events.iter().any(|e| matches!(e, egui::Event::Key { .. } | egui::Event::PointerButton { .. }))
++    });
++    if moved {
++        last = now;
++    }
++    if now - last < REST_SECS {
++        k = (k + (dt / 0.12) as f32).min(1.0);
++    } else {
++        k = (k - (dt / 0.8) as f32).max(0.0);
++    }
++    ctx.data_mut(|d| d.insert_temp(id, (now, k, last)));
++    if k > 0.0 && k < 1.0 {
++        ctx.request_repaint();
++    } else if k >= 1.0 {
++        ctx.request_repaint_after(std::time::Duration::from_millis(250));
++    }
++    k
 +}
 diff --git a/src/ui/glyphs.rs b/src/ui/glyphs.rs
 index 288ad8c7..4696a38d 100644
@@ -3051,7 +3104,7 @@ index 5fb5537b..1f1cd7c2 100644
          });
      });
 diff --git a/src/ui/mini.rs b/src/ui/mini.rs
-index 249fb6f8..352d1a50 100644
+index 249fb6f8..b81defbf 100644
 --- a/src/ui/mini.rs
 +++ b/src/ui/mini.rs
 @@ -697,6 +697,9 @@ fn marks(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model::Tra
@@ -3064,25 +3117,23 @@ index 249fb6f8..352d1a50 100644
          app.actions.push(Action::Like(t.clone(), !liked));
      }
      let m = disc(ui, pos2(right - MARK / 2.0, cy), "menu", "Song options");
-@@ -753,11 +756,15 @@ fn seek_slider(app: &mut App, ui: &mut Ui, l: f32, r: f32, cy: f32, total: f32,
+@@ -753,12 +756,10 @@ fn seek_slider(app: &mut App, ui: &mut Ui, l: f32, r: f32, cy: f32, total: f32,
      let h = theme::anim_bool(&ctx, "mini-seek-h", live && (resp.hovered() || resp.dragged()), 0.15);
      let thick = 5.0 + 2.0 * h;
      let line = Rect::from_min_max(pos2(l, cy - thick / 2.0), pos2(r, cy + thick / 2.0));
 -    ui.painter().rect_filled(line, thick / 2.0, theme::glass(0.26));
      let frac = if total > 0.0 { pos / total } else { 0.0 };
 -    ui.painter().rect_filled(Rect::from_min_max(line.min, pos2(line.left() + line.width() * frac, line.bottom())), thick / 2.0, Color32::WHITE);
-     if live {
-+        // The same wavy line as Now Playing: moving while the song plays, flat when held.
-+        let amp = theme::anim_bool(&ctx, "mini-wave", app.playing(), 0.5);
-+        super::fx::wave(ui, l, r, cy, thick, frac, Color32::WHITE, theme::glass(0.26), 6.5 + 1.5 * h + 3.0, amp, ui.input(|i| i.time));
-         ui.painter().circle_filled(pos2(line.left() + line.width() * frac, cy), 6.5 + 1.5 * h, Color32::WHITE);
-+    } else {
-+        ui.painter().rect_filled(line, thick / 2.0, theme::glass(0.26));
-+        ui.painter().rect_filled(Rect::from_min_max(line.min, pos2(line.left() + line.width() * frac, line.bottom())), thick / 2.0, Color32::WHITE);
-     }
+-    if live {
+-        ui.painter().circle_filled(pos2(line.left() + line.width() * frac, cy), 6.5 + 1.5 * h, Color32::WHITE);
+-    }
++    // Mochy's flat line: no wave, no knob, the played part cut straight at its end.
++    ui.painter().rect_filled(line, thick / 2.0, theme::glass(0.26));
++    super::fx::flat_fill(ui, line, frac, Color32::WHITE);
      let at = |p: Pos2| ((p.x - l) / (r - l).max(1.0)).clamp(0.0, 1.0) * total;
      if live
-@@ -811,13 +818,13 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
+         && let Some(p) = resp.interact_pointer_pos()
+@@ -811,13 +812,13 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
      let on = theme::anim_bool(&ctx, "mini-shuffle", app.queue.shuffled, 0.2);
      let tint = super::nowplaying::lit_mark(app, on, ink(h));
@@ -3098,7 +3149,7 @@ index 249fb6f8..352d1a50 100644
      if r.clicked() && enabled {
          app.prev();
      }
-@@ -825,6 +832,7 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
+@@ -825,6 +826,7 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
      let r = btn(ui, x(0.50), 19.0, "play", if playing { "Pause" } else { "Play" });
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.15);
      let c = r.rect.center();
@@ -3106,7 +3157,7 @@ index 249fb6f8..352d1a50 100644
      let morph = theme::anim_bool(&ctx, "mini-play-morph", playing || app.buffering, 0.18);
      let fg = ink(0.55 + 0.45 * h);
      if app.buffering {
-@@ -833,17 +841,17 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
+@@ -833,17 +835,17 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
          ui.painter().add(egui::Shape::Path(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(2.0, fg))));
          ctx.request_repaint_after(Duration::from_millis(33));
      } else if morph < 1.0 {
@@ -3127,7 +3178,7 @@ index 249fb6f8..352d1a50 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -856,7 +864,7 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
+@@ -856,7 +858,7 @@ fn transport(app: &mut App, ui: &mut Ui, col: Rect, track: &Option<crate::model:
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
      let ron = theme::anim_bool(&ctx, "mini-repeat", on, 0.2);
      let tint = super::nowplaying::lit_mark(app, ron, ink(h));
@@ -3136,6 +3187,17 @@ index 249fb6f8..352d1a50 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
+@@ -905,9 +907,7 @@ fn chrome(app: &mut App, ui: &mut Ui, r: Rect, col: Rect, cap_r: f32, cap_w: f32
+         let sh = theme::anim_bool(&ctx, sresp.id.with("h"), sresp.hovered() || sresp.dragged(), 0.12);
+         sresp.widget_info(|| egui::WidgetInfo::slider(true, vol as f64, "Volume"));
+         ui.painter().rect_filled(t, 2.5, theme::with_alpha(Color32::WHITE, 0.28));
+-        let fw = t.width() * vol;
+-        ui.painter().rect_filled(Rect::from_min_max(t.min, pos2(t.left() + fw, t.bottom())), 2.5, Color32::WHITE.gamma_multiply(reveal));
+-        ui.painter().circle_filled(pos2(t.left() + fw, cy), 6.5 + 1.5 * sh, Color32::WHITE.gamma_multiply(reveal));
++        super::fx::flat_fill(ui, t, vol, Color32::WHITE.gamma_multiply(reveal));
+         if let Some(p) = sresp.interact_pointer_pos()
+             && (sresp.clicked() || sresp.dragged())
+         {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
 index 252e6b96..e57885c6 100644
 --- a/src/ui/mod.rs
@@ -3405,10 +3467,26 @@ index f0c14b88..b8d22a91 100644
              let sub = if d.ready {
                  format!("You're on {}. It's downloaded and installs when you close the app.", crate::update::current_version())
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc3762..37f8069b 100644
+index 28fc3762..7875e0d4 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
-@@ -458,26 +458,52 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -296,6 +296,15 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+     let lift = 20.0 - f32::from(super::titlebar::top_margin(20, 44.0));
+     let header = Rect::from_min_size(area.min - vec2(0.0, if app.fullscreen { 0.0 } else { lift }), vec2(area.width(), 44.0));
+     let mut hui = ui.new_child(egui::UiBuilder::new().max_rect(header).layout(egui::Layout::left_to_right(egui::Align::Center)));
++    // Left alone, the extras (these buttons, the star, the lyrics and queue tabs) fade away
++    // and the pointer with them, leaving the cover, the name, the seek line and the
++    // transport; any movement brings them straight back.
++    let calm = super::fx::calm(ui.ctx());
++    let hui_opacity = hui.opacity() * calm;
++    hui.set_opacity(hui_opacity);
++    if calm <= 0.0 {
++        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
++    }
+     // The left capsule closes the sheet or opens the mini player; volume and Sing sit
+     // at the right, above every panel.
+     let left = Rect::from_min_size(pos2(header.left(), header.center().y - 16.0), vec2(64.0, 32.0));
+@@ -458,26 +467,54 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      }
  
      // Bottom right: ONE seamless capsule carrying the lyrics and the queue, as the
@@ -3423,6 +3501,8 @@ index 28fc3762..37f8069b 100644
      // column of words it belongs to.
      let cap_x = if video { area.right() - 80.0 } else { vedge - 80.0 };
      let cap = Rect::from_min_size(pos2(cap_x, area.bottom() - 40.0), vec2(72.0, 36.0));
++    let base_opacity = ui.opacity();
++    ui.set_opacity(base_opacity * calm);
      capsule(ui, cap);
 +    // The lens: one bead of glass that glides to whichever cell is lit and fades away
 +    // when neither is (resting where it last was), rather than a disc that jumps.
@@ -3469,7 +3549,11 @@ index 28fc3762..37f8069b 100644
          }
      };
      let r = corner(ui, 0, "lyrics", "Lyrics");
-@@ -503,8 +529,21 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -500,11 +537,25 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+     if r.clicked() {
+         app.np_tab = if on { NpTab::Art } else { NpTab::UpNext };
+     }
++    ui.set_opacity(base_opacity);
  }
  
  /// A frosted capsule in the player's chrome: one seamless pill its slots sit inside.
@@ -3492,7 +3576,19 @@ index 28fc3762..37f8069b 100644
  }
  
  /// One of a header capsule's two equal cells.
-@@ -803,6 +842,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -588,10 +639,7 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+     let resp = named(ui.interact(track.expand(8.0), ui.scope_id().with("np-vol"), Sense::click_and_drag()), "Volume").on_hover_cursor(egui::CursorIcon::PointingHand);
+     let h = theme::anim_bool(ctx, resp.id.with("h"), resp.hovered() || resp.dragged(), 0.15);
+     ui.painter().rect_filled(track, 2.0, Color32::from_white_alpha(58));
+-    let fill = Rect::from_min_size(track.min, vec2(track.width() * vol, 4.0));
+-    ui.painter().rect_filled(fill, 2.0, theme::lerp_color(Color32::from_white_alpha(206), Color32::WHITE, h));
+-    let knob = Rect::from_center_size(pos2(track.left() + track.width() * vol, rect.center().y), vec2(16.0, 12.0));
+-    ui.painter().rect_filled(knob, 6.0, theme::lerp_color(Color32::from_white_alpha(235), Color32::WHITE, h));
++    super::fx::flat_fill(ui, track, vol, theme::lerp_color(Color32::from_white_alpha(206), Color32::WHITE, h));
+     if let Some(p) = resp.interact_pointer_pos()
+         && (resp.dragged() || resp.clicked())
+     {
+@@ -803,6 +851,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
                  if cs.brightness < 0.99 {
                      ui.painter().rect_filled(draw, draw_cr, theme::shade(1.0 - cs.brightness));
                  }
@@ -3501,7 +3597,17 @@ index 28fc3762..37f8069b 100644
              }
          }
          // A handoff still shows the outgoing song; the stats are the incoming one's.
-@@ -905,6 +946,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -885,6 +935,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+     }
+     // The star: a 30 px disc that washes under the pointer and fills in the accent
+     // once liked. The ⋯ menu sits at the line's end, as on music.youtube.com.
++    let calm = super::fx::calm(ui.ctx());
++    let base_opacity = ui.opacity();
++    ui.set_opacity(base_opacity * calm);
+     let liked = app.liked.contains(&heard.id);
+     let star = Rect::from_center_size(pos2(art.right() - 55.0, info_y + 14.0), Vec2::splat(30.0));
+     let sr = ui.interact(star, ui.scope_id().with(("np-like", &heard.id)), Sense::click());
+@@ -905,11 +958,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          // The other half of the star: a right click tells YouTube the song isn't wanted.
          app.actions.push(Action::Dislike(heard.clone()));
      } else if sr.clicked() {
@@ -3512,22 +3618,22 @@ index 28fc3762..37f8069b 100644
          app.actions.push(Action::Like(heard.clone(), !liked));
      }
      // The song's options, beside the star.
-@@ -960,7 +1005,13 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+     let options = Rect::from_center_size(pos2(art.right() - 15.0, info_y + 14.0), Vec2::splat(34.0));
+     options_menu(app, ui, options, &heard);
++    ui.set_opacity(base_opacity);
+ 
+     // Seek: a 4 px line that grows under the pointer, its times below.
+     let status = app.audio.status.clone();
+@@ -960,6 +1018,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let focus = theme::anim_bool(ui.ctx(), "np-seek-h", total > 0.0 && !held && (sresp.hovered() || sresp.dragged()), 0.18);
      let thick = side * (0.008 + 0.0055 * focus);
      let bar = Rect::from_min_max(pos2(x0, hit.center().y - thick / 2.0), pos2(x0 + w, hit.center().y + thick / 2.0));
--    ui.painter().rect_filled(bar, thick / 2.0, Color32::from_white_alpha(38));
-+    // Mochy's seek line: wavy while the song plays, straight when it is held. The played
-+    // part is drawn as the wave below; the track here is only what is still to come.
++    // Mochy's seek line: flat, no knob, the played part cut straight at its end.
 +    let frac_now = if total > 0.0 { (pos / total).clamp(0.0, 1.0) } else { 0.0 };
-+    let knob_r = thick * 0.9 + 2.5 + 1.5 * focus;
-+    if total <= 0.0 {
-+        ui.painter().rect_filled(bar, thick / 2.0, Color32::from_white_alpha(38));
-+    }
+     ui.painter().rect_filled(bar, thick / 2.0, Color32::from_white_alpha(38));
      // Automix: the handoff window tints to the song's colour with its start ticked, so
      // the blend has a place it visibly begins at.
-     if mix > 0.5 {
-@@ -970,10 +1021,11 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -970,10 +1030,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let tick = Rect::from_min_size(pos2(edge - 1.0, bar.top()), vec2(2.0, thick));
          ui.painter().rect_filled(tick, 1.0, theme::with_alpha(app.accent_color(), 0.9));
      }
@@ -3537,13 +3643,22 @@ index 28fc3762..37f8069b 100644
 -        ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * frac, thick)), thick / 2.0, fill);
 +    if total > 0.0 {
 +        let fill = theme::lerp_color(Color32::from_white_alpha(190), Color32::from_white_alpha(250), focus);
-+        let amp = theme::anim_bool(ui.ctx(), "np-wave", app.playing() && !held, 0.5);
-+        super::fx::wave(ui, bar.left(), bar.right(), bar.center().y, thick, frac_now, fill, Color32::from_white_alpha(38), knob_r + 2.5, amp, ui.input(|i| i.time));
-+        ui.painter().circle_filled(pos2(bar.left() + bar.width() * frac_now, bar.center().y), knob_r, fill);
++        super::fx::flat_fill(ui, bar, frac_now, fill);
      }
      let at = |p: egui::Pos2| (((p.x - x0) / w.max(1.0)).clamp(0.0, 1.0) * total).max(0.0);
      let tc = theme::with_alpha(Color32::WHITE, 0.62);
-@@ -1023,7 +1075,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -986,7 +1045,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+     ui.painter().galley(pos2(x0 + w - g.size().x, times_y - lh / 2.0), g, tc);
+     let badge_w = audio_badge_width(ui, app, false);
+     if badge_w > 0.0 {
++        let base_opacity = ui.opacity();
++        ui.set_opacity(base_opacity * super::fx::calm(ui.ctx()));
+         audio_badge(app, ui, pos2(x0 + (w - badge_w) / 2.0, times_y - lh / 2.0), false);
++        ui.set_opacity(base_opacity);
+     }
+     // While the two songs blend, its name sits there instead.
+     let mixed = theme::anim_bool(ui.ctx(), "np-automix-on", app.mixing(), 0.3);
+@@ -1023,7 +1085,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -3552,7 +3667,7 @@ index 28fc3762..37f8069b 100644
          }
          (resp, h, p)
      };
-@@ -1031,18 +1083,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1031,18 +1093,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let shuffled = app.queue.shuffled;
      let son = theme::anim_bool(ui.ctx(), r.id.with("on"), shuffled, 0.25);
      let mark = lit_mark(app, son, ink(h, 0.55, 1.0));
@@ -3574,7 +3689,7 @@ index 28fc3762..37f8069b 100644
      let mark = ink(h, 1.0, dim);
      let morph = theme::anim_bool(ui.ctx(), "np-play-morph", app.playing() || app.buffering, 0.18);
      if app.buffering {
-@@ -1064,7 +1116,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1064,7 +1126,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.toggle();
      }
      let (r, h, p) = btn(ui, 3, "next", "Next", enabled);
@@ -3583,7 +3698,7 @@ index 28fc3762..37f8069b 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1077,7 +1129,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1077,7 +1139,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
      let mark = lit_mark(app, ron, ink(h, 0.55, 1.0));
@@ -3977,7 +4092,7 @@ index 899a3c7a..c5ad8d88 100644
      if !settings_group_shown(ui) {
          return;
 diff --git a/src/ui/shell.rs b/src/ui/shell.rs
-index 96240d41..0048dd40 100644
+index 96240d41..0b3d0cc2 100644
 --- a/src/ui/shell.rs
 +++ b/src/ui/shell.rs
 @@ -162,6 +162,7 @@ fn history_button(ui: &mut Ui, at: Pos2, glyph: char, name: &str) -> bool {
@@ -4030,7 +4145,7 @@ index 96240d41..0048dd40 100644
      if !app.loading {
          return;
      }
-@@ -872,6 +887,34 @@ pub fn grey_frost(app: &App, ui: &Ui, rect: Rect, radius: f32, alpha: f32) {
+@@ -872,6 +887,39 @@ pub fn grey_frost(app: &App, ui: &Ui, rect: Rect, radius: f32, alpha: f32) {
      ui.painter().rect_stroke(rect, radius, egui::Stroke::new(1.0, theme::with_alpha(theme::glass(0.16), alpha)), egui::StrokeKind::Inside);
  }
  
@@ -4055,17 +4170,22 @@ index 96240d41..0048dd40 100644
 +/// a near-black slab that takes nothing from the song, and a soft, thin rim. No shadow
 +/// and no sheen behind or over it: the shape is the glass alone.
 +pub fn chrome_glass(app: &App, ui: &Ui, rect: Rect, radius: f32) {
-+    // Mochy's frosted bar, kept dark: the song's blurred sleeve behind, 78% black over it.
-+    // No outline. Without art yet it is plain black.
-+    if !frost(app, ui, rect, radius, 0.78) {
-+        ui.painter().rect_filled(rect, radius, Color32::from_rgba_unmultiplied(0, 0, 0, 226));
++    // Mochy's chrome, to the letter and the same whatever plays: #131313 (a touch more
++    // opaque than its 78%, as egui cannot blur the page behind it), a 2 px white hairline at
++    // 5% just inside the edge, and a faint lift shadow. It no longer takes the song's colour.
++    let _ = app;
++    let p = ui.painter();
++    for (w, a) in [(8.0, 2u8), (5.0, 3), (2.5, 4)] {
++        p.rect_stroke(rect, radius, Stroke::new(w, Color32::from_black_alpha(a)), egui::StrokeKind::Outside);
 +    }
++    p.rect_filled(rect, radius, Color32::from_rgba_unmultiplied(0x13, 0x13, 0x13, 224));
++    p.rect_stroke(rect, radius, Stroke::new(2.0, Color32::from_white_alpha(13)), egui::StrokeKind::Inside);
 +}
 +
  /// An opened release's own sleeve blown up behind its page. The blur is the cover's, so
  /// the page wears its colours; it dims and fades into the page ground before the first
  /// row, so the words on top never have to fight the picture.
-@@ -891,18 +934,23 @@ pub fn cover_wash(app: &App, ui: &mut Ui, rect: Rect) {
+@@ -891,18 +939,23 @@ pub fn cover_wash(app: &App, ui: &mut Ui, rect: Rect) {
              t
          }
      };
@@ -4093,7 +4213,7 @@ index 96240d41..0048dd40 100644
  fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle, egui::TextureHandle, egui::TextureHandle)> {
      let (key, rgba) = app.frost_art.as_ref()?;
      let id = egui::Id::unique("frost-tex");
-@@ -933,37 +981,12 @@ fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle
+@@ -933,37 +986,12 @@ fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle
      Some(t)
  }
  
@@ -4137,7 +4257,7 @@ index 96240d41..0048dd40 100644
  }
  
  /// The player: one frosted capsule floating over the bottom of the window, as in the
-@@ -974,7 +997,6 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -974,7 +1002,6 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      if frosted {
          // The page scrolls on under this strip: fade it out rather than end it at the
          // player's edge. Clicks in the fade stay with the player, not the rows beneath.
@@ -4145,7 +4265,7 @@ index 96240d41..0048dd40 100644
          ui.interact(full, ui.id().with("player-strip"), Sense::hover());
      }
      // Apple's floating player, measured off its own page: a 52 pt pill of its own width,
-@@ -994,27 +1016,17 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -994,27 +1021,17 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      let text_w = (full.width() - 40.0 - (PAD * 2.0 + ART + 8.0 + GAP + t_w + GAP + u_w)).clamp(60.0, 200.0);
      let w = (PAD * 2.0 + ART + 8.0 + text_w + GAP + t_w + GAP + u_w).min(full.width() - 24.0);
      let cap = Rect::from_center_size(pos2(full.center().x, full.bottom() - 20.0 - H / 2.0), vec2(w, H));
@@ -4183,7 +4303,7 @@ index 96240d41..0048dd40 100644
  
      let status = app.audio.status.clone();
      // An Automix handoff keeps the outgoing song on this strip until the next one is
-@@ -1059,19 +1071,20 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1059,19 +1076,20 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      };
      let r = tbtn(ui, sh_x, "shuffle", "Shuffle");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -4206,7 +4326,7 @@ index 96240d41..0048dd40 100644
      let morph = theme::anim_bool(&ctx, "bar-play-morph", playing || app.buffering, 0.18);
      if app.buffering {
          let a = now as f32 * 6.0;
-@@ -1083,10 +1096,10 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1083,10 +1101,10 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
          // through a buffer, and a hard cut between the two weights flickers.
          let fg = ink(0.55 + 0.45 * h);
          if morph < 1.0 {
@@ -4219,7 +4339,7 @@ index 96240d41..0048dd40 100644
          }
      }
      if r.clicked() && enabled {
-@@ -1094,7 +1107,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1094,7 +1112,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      }
      let r = tbtn(ui, nx_x, "next", "Next");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -4228,7 +4348,7 @@ index 96240d41..0048dd40 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1105,7 +1118,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1105,7 +1123,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      };
      let r = tbtn(ui, rp_x, "repeat", "Repeat");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -4237,7 +4357,7 @@ index 96240d41..0048dd40 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1194,7 +1207,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1194,7 +1212,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      // the times, which take the same row so nothing overlaps.
      let (title, _) = match &track {
          Some(t) => (t.title.clone(), ()),
@@ -4246,7 +4366,7 @@ index 96240d41..0048dd40 100644
      };
      let fade = 1.0 - 0.7 * focus;
      let afade = 1.0 - focus;
-@@ -1346,10 +1359,10 @@ fn paint_mark(ui: &Ui, r: Rect) {
+@@ -1346,10 +1364,10 @@ fn paint_mark(ui: &Ui, r: Rect) {
  }
  
  /// The BitChord mark, fitted inside `r`, tinted `tint`.
