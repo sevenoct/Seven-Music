@@ -2435,6 +2435,27 @@ index bc4220d..6b2305f 100644
      #[cfg(not(target_os = "linux"))]
      let builder = builder.with_tooltip("YT Music");
      Ok((builder.build()?, toggle))
+diff --git a/src/ui/actions.rs b/src/ui/actions.rs
+index f869295..5ab1659 100644
+--- a/src/ui/actions.rs
++++ b/src/ui/actions.rs
+@@ -188,6 +188,16 @@ impl App {
+                 self.set_liked(std::slice::from_ref(&t), false);
+                 self.backend.request(Req::Dislike(t.id));
+             }
++            Action::TogglePin(card) => {
++                let Some(key) = super::tabbar::pin_key(&card.target) else { return };
++                if let Some(i) = self.pins.iter().position(|p| super::tabbar::pin_key(&p.target).as_deref() == Some(key.as_str())) {
++                    self.pins.remove(i);
++                    self.toast("Unpinned from the sidebar");
++                } else {
++                    self.pins.push(card);
++                    self.toast("Pinned to the sidebar");
++                }
++            }
+             Action::Share(target) => {
+                 self.share_pending = Some(share_url(&target));
+                 self.toast("Link copied");
 diff --git a/src/ui/dialogs.rs b/src/ui/dialogs.rs
 index 420d560..ab42213 100644
 --- a/src/ui/dialogs.rs
@@ -3057,7 +3078,7 @@ index 288ad8c..4696a38 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 0000000..a8383bf
+index 0000000..20d2489
 --- /dev/null
 +++ b/src/ui/hero.rs
 @@ -0,0 +1,504 @@
@@ -3545,7 +3566,7 @@ index 0000000..a8383bf
 +        widgets::paint_cover(&cu, art, &t.thumbs, 10.0, 1.0);
 +        let x = art.right() + 12.0;
 +        let tw = (rect.right() - x - 46.0).max(20.0);
-+        widgets::text_at(&cu, pos2(x, rect.center().y - 19.0), &t.title, theme::semibold(14.0), theme::text(), tw);
++        widgets::text_marquee(&cu, pos2(x, rect.center().y - 19.0), &t.title, theme::semibold(14.0), theme::text(), tw, resp.hovered());
 +        widgets::text_at(&cu, pos2(x, rect.center().y + 3.0), &t.artist_line(), theme::regular(12.5), theme::text_dim(), tw);
 +        if playing.as_deref() == Some(t.id.as_str()) {
 +            cu.painter().circle_filled(pos2(rect.right() - 46.0, rect.center().y), 3.5, accent);
@@ -3687,7 +3708,7 @@ index 249fb6f..b81defb 100644
              && (sresp.clicked() || sresp.dragged())
          {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..cce467f 100644
+index 252e6b9..dac8a97 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,9 @@ mod backdrop;
@@ -3718,7 +3739,16 @@ index 252e6b9..cce467f 100644
      Album(String),
      Playlist(String),
      Artist(String),
-@@ -942,7 +948,34 @@ pub struct App {
+@@ -236,6 +242,8 @@ pub enum Action {
+     UpgradeQuality,
+     /// A song chosen on the search page as the Spotify transfer's match.
+     TransferPick(Track),
++    /// Pin a playlist, album or artist to the left rail, or take it off.
++    TogglePin(Card),
+ }
+ 
+ fn removal_items(c: &crate::backend::Collection, rows: impl IntoIterator<Item = usize>) -> Vec<(String, String)> {
+@@ -942,7 +950,46 @@ pub struct App {
      /// Light or dark pages (the ytm-rs theme's; see `light_pages`).
      appearance: theme::Appearance,
      anim_bg: bool,
@@ -3742,6 +3772,18 @@ index 252e6b9..cce467f 100644
 +    /// Two-finger swipe on a touchpad goes back / forward, as in a browser.
 +    swipe_nav: bool,
 +    swipe_invert: bool,
++    /// In the player the same swipe changes the song: right is previous, left is next.
++    swipe_skip: bool,
++    /// Long titles slide to show their end while the pointer rests on them.
++    marquee: bool,
++    /// Playlists, albums and artists pinned to the left rail.
++    pins: Vec<Card>,
++    /// The sleep timer: the moment it stops the music, or the song it stops after, and the
++    /// volume the fade-out started from; `sleep_pick` is the menu's choice (0: song's end).
++    sleep_end: Option<f64>,
++    sleep_song: Option<String>,
++    sleep_vol: Option<f32>,
++    sleep_pick: Option<u32>,
 +    /// Horizontal travel gathered so far, when it last moved, when the last jump
 +    /// happened, and which way it went (for the indicator's farewell).
 +    swipe_acc: f32,
@@ -3753,7 +3795,7 @@ index 252e6b9..cce467f 100644
      reactive_bg: bool,
      /// Power saver: the shader blurs behind pages and the player stand down for a flat
      /// ambient tint, which costs an integrated GPU almost nothing.
-@@ -1387,13 +1420,28 @@ impl App {
+@@ -1387,13 +1434,35 @@ impl App {
              disable_direct_stream,
              background_art: None,
              art_changed: -10.0,
@@ -3775,6 +3817,13 @@ index 252e6b9..cce467f 100644
 +            np_gradient: get("np_gradient").is_some_and(|v| v == "1"),
 +            swipe_nav: get("swipe_nav").is_none_or(|v| v == "1"),
 +            swipe_invert: get("swipe_invert").is_some_and(|v| v == "1"),
++            swipe_skip: get("swipe_skip").is_none_or(|v| v == "1"),
++            marquee: get("marquee").is_none_or(|v| v == "1"),
++            pins: get("pins").and_then(|s| serde_json::from_str::<Vec<Card>>(&s).ok()).unwrap_or_default(),
++            sleep_end: None,
++            sleep_song: None,
++            sleep_vol: None,
++            sleep_pick: None,
 +            swipe_acc: 0.0,
 +            swipe_last: 0.0,
 +            swipe_done: -10.0,
@@ -3783,7 +3832,7 @@ index 252e6b9..cce467f 100644
              reactive_bg: get("reactive_bg").is_none_or(|v| v == "1"),
              disable_blur: get("disable_blur").is_some_and(|v| v == "1"),
              animated_artwork: get("animated_artwork").is_some_and(|v| v == "1"),
-@@ -1600,6 +1648,78 @@ impl App {
+@@ -1600,6 +1669,155 @@ impl App {
          }
      }
  
@@ -3796,7 +3845,8 @@ index 252e6b9..cce467f 100644
 +        const NEED: f32 = 150.0;
 +        const QUIET: f64 = 0.7;
 +        let (dx, dy) = ctx.input(|i| (i.smooth_scroll_delta.x, i.smooth_scroll_delta.y));
-+        if !self.swipe_nav || self.np_open || self.jam_open {
++        let skip = self.np_open;
++        if !(if skip { self.swipe_skip } else { self.swipe_nav }) || self.jam_open {
 +            self.swipe_acc = 0.0;
 +        } else {
 +            if now - self.swipe_last > 0.3 {
@@ -3813,14 +3863,15 @@ index 252e6b9..cce467f 100644
 +            }
 +            let sign = if self.swipe_invert { -1.0 } else { 1.0 };
 +            let back = self.swipe_acc * sign > 0.0;
-+            let can = if back { !self.back.is_empty() } else { !self.forward.is_empty() };
++            let can = if skip { self.current().is_some() } else if back { !self.back.is_empty() } else { !self.forward.is_empty() };
 +            if !can {
 +                self.swipe_acc = 0.0;
 +            } else if self.swipe_acc.abs() >= NEED {
-+                if back {
-+                    self.nav_back();
-+                } else {
-+                    self.nav_forward();
++                match (skip, back) {
++                    (true, true) => self.prev(),
++                    (true, false) => self.next(),
++                    (false, true) => self.nav_back(),
++                    (false, false) => self.nav_forward(),
 +                }
 +                self.swipe_fire = Some((now, back));
 +                self.swipe_done = now;
@@ -3859,10 +3910,85 @@ index 252e6b9..cce467f 100644
 +        painter.line_segment([c + vec2(hx, 0.0), c + vec2(-hx, hy)], s);
 +    }
 +
++    /// The sleep timer's clock: counts down (or follows the song to its end), fades the
++    /// volume over the last seconds, then pauses and gives the volume back.
++    fn sleep_tick(&mut self, now: f64) {
++        const FADE: f64 = 8.0;
++        let left = if let Some(end) = self.sleep_end {
++            end - now
++        } else if let Some(id) = &self.sleep_song {
++            if self.playing_id() != Some(id.as_str()) {
++                0.0
++            } else {
++                match self.audio.status.duration() {
++                    Some(d) => d.as_secs_f64() - self.audio.status.position_smooth().as_secs_f64(),
++                    None => return,
++                }
++            }
++        } else {
++            return;
++        };
++        if left <= 0.0 {
++            if self.playing() {
++                self.toggle();
++            }
++            if let Some(v) = self.sleep_vol.take() {
++                self.audio.set_volume(v);
++            }
++            self.sleep_end = None;
++            self.sleep_song = None;
++            self.sleep_pick = None;
++            self.toast("Sleep timer: music stopped");
++        } else if left < FADE {
++            let base = match self.sleep_vol {
++                Some(v) => v,
++                None => {
++                    let v = self.audio.volume();
++                    self.sleep_vol = Some(v);
++                    v
++                }
++            };
++            self.audio.set_volume(base * (left / FADE) as f32);
++        }
++    }
++
++    /// Turns the sleep timer off, giving back the volume if it had begun to fade.
++    pub(super) fn sleep_cancel(&mut self) {
++        if let Some(v) = self.sleep_vol.take() {
++            self.audio.set_volume(v);
++        }
++        self.sleep_end = None;
++        self.sleep_song = None;
++        self.sleep_pick = None;
++    }
++
++    /// Stop the music in `minutes`, or (0) when the song now playing ends.
++    pub(super) fn sleep_set(&mut self, now: f64, minutes: u32) {
++        self.sleep_cancel();
++        self.sleep_pick = Some(minutes);
++        if minutes == 0 {
++            self.sleep_song = self.playing_id().map(str::to_owned);
++            self.toast("Sleep timer: after this song");
++        } else {
++            self.sleep_end = Some(now + minutes as f64 * 60.0);
++            self.toast(format!("Sleep timer: {minutes} minutes"));
++        }
++    }
++
++    /// What the menu says next to the timer while one is set.
++    pub(super) fn sleep_label(&self, now: f64) -> Option<String> {
++        if let Some(end) = self.sleep_end {
++            let s = (end - now).max(0.0).ceil() as u64;
++            Some(if s >= 60 { format!("{} min left", s.div_ceil(60)) } else { format!("{s} s left") })
++        } else {
++            self.sleep_song.as_ref().map(|_| "after this song".to_owned())
++        }
++    }
++
      fn nav_forward(&mut self) {
          if let Some(p) = self.forward.pop() {
              self.apple.clear();
-@@ -1817,7 +1937,7 @@ impl App {
+@@ -1817,7 +2035,7 @@ impl App {
          // With the icon tint off, a preset that borrows the cover's colour keeps the app's
          // own red instead; a preset that names its own colour is untouched by the switch.
          let untinted = !self.icon_tint && self.look().accent == "cover";
@@ -3871,7 +3997,7 @@ index 252e6b9..cce467f 100644
          if theme::light() {
              // A pale cover colour would barely show on light pages: deepen it.
              let luma = 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
-@@ -1830,8 +1950,9 @@ impl App {
+@@ -1830,8 +2048,9 @@ impl App {
  
      /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
      /// Settings › Appearance › Mode.
@@ -3883,7 +4009,15 @@ index 252e6b9..cce467f 100644
      }
  
      /// The active theme preset. Synced once per frame (`sync_look`), so this is a plain
-@@ -1929,6 +2050,16 @@ impl App {
+@@ -1911,6 +2130,7 @@ impl App {
+     }
+ 
+     pub(crate) fn run_logic(&mut self, ctx: &egui::Context, now: f64, has_window: bool) {
++        self.sleep_tick(now);
+         let links = crate::deeplink::take();
+         let reveal = crate::deeplink::take_show() || !links.is_empty();
+         self.tray_window(ctx, reveal);
+@@ -1929,6 +2149,16 @@ impl App {
              m.set_playing(playing);
          }
          self.request_lyric_extras();
@@ -3900,7 +4034,7 @@ index 252e6b9..cce467f 100644
          // Upload: files from the picker, or dropped onto the window.
          let mut files = self.picked_uploads.lock().unwrap().take().unwrap_or_default();
          files.extend(ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_owned()).filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>()));
-@@ -1989,6 +2120,7 @@ impl App {
+@@ -1989,6 +2219,7 @@ impl App {
          }
          if has_window {
              fit_window_to_monitor(ctx);
@@ -3908,7 +4042,7 @@ index 252e6b9..cce467f 100644
          }
          // Dev hook: YTM_MINI=<secs>[,<secs>…] switches between the mini player and the
          // full window at those times (YTM_MINI=1: the mini player after a second).
-@@ -2040,12 +2172,18 @@ impl App {
+@@ -2040,12 +2271,18 @@ impl App {
                  ctx.request_repaint_after(Duration::from_millis(250));
              }
          } else if self.np_open && playing && !self.mini.busy() {
@@ -3929,7 +4063,7 @@ index 252e6b9..cce467f 100644
          } else if playing || self.buffering {
              ctx.request_repaint_after(Duration::from_millis(250));
          }
-@@ -2106,7 +2244,6 @@ impl eframe::App for App {
+@@ -2106,7 +2343,6 @@ impl eframe::App for App {
          // The full-screen player always keeps the sung lines: its sheet is the whole
          // picture, and the setting only trims the panels.
          ctx.data_mut(|d| d.insert_temp(egui::Id::unique("lyrics-past"), self.show_past_lines || self.fullscreen));
@@ -3937,7 +4071,7 @@ index 252e6b9..cce467f 100644
          // Once now playing has slid all the way up it hides everything but the player
          // bar, so the pages and the full-screen background under it aren't drawn.
          let covered = !self.fullscreen && np >= 1.0;
-@@ -2143,29 +2280,8 @@ impl eframe::App for App {
+@@ -2143,29 +2379,8 @@ impl eframe::App for App {
                  .show(ui, |ui| shell::player_bar(self, ui, now, false));
          }
          if !self.fullscreen && !covered {
@@ -3969,7 +4103,7 @@ index 252e6b9..cce467f 100644
              let section = ui.available_rect_before_wrap();
              let q = theme::anim_bool(&ctx, "queue-drawer", self.queue_open && !self.np_open, 0.25);
              if q > 0.01 {
-@@ -2188,11 +2304,13 @@ impl eframe::App for App {
+@@ -2188,11 +2403,13 @@ impl eframe::App for App {
              let main_right = ui.available_rect_before_wrap().right();
              egui::CentralPanel::default()
                  .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -3985,7 +4119,7 @@ index 252e6b9..cce467f 100644
                      bottom: 0,
                  }))
                  .show(ui, |ui| {
-@@ -2211,6 +2329,8 @@ impl eframe::App for App {
+@@ -2211,6 +2428,8 @@ impl eframe::App for App {
                          shell::player_bar(self, ui, now, true);
                      });
                  });
@@ -3994,13 +4128,18 @@ index 252e6b9..cce467f 100644
          }
          if np > 0.001 {
              let pages = theme::set_mode(&ctx, false);
-@@ -2226,12 +2346,15 @@ impl eframe::App for App {
+@@ -2226,12 +2445,20 @@ impl eframe::App for App {
          shell::toast(self, &ctx, now);
  
          // The player keeps the window buttons too: the top right stays the window's.
 -        titlebar::window_buttons(&ctx);
 +        titlebar::window_buttons(&ctx, if self.np_open { fx::calm(&ctx) } else { titlebar::proximity(&ctx) });
          titlebar::resize_edges(&ctx);
++        // What the widgets (which don't see the app) need to know this frame.
++        ctx.data_mut(|d| {
++            d.insert_temp(egui::Id::new("marquee-on"), self.marquee);
++            d.insert_temp(egui::Id::new("pinned-keys"), self.pins.iter().filter_map(|c| tabbar::pin_key(&c.target)).collect::<Vec<String>>());
++        });
 +        self.swipe_navigation(&ctx, now);
          // Back from the mini player.
          self.mini.fade_in(&ctx, now, shell::base_color(self));
@@ -4011,7 +4150,7 @@ index 252e6b9..cce467f 100644
  
          if dev_var("YTM_THEME_TOUR").is_some() {
              self.theme_tour(&ctx, now);
-@@ -2392,7 +2515,16 @@ impl eframe::App for App {
+@@ -2392,7 +2619,19 @@ impl eframe::App for App {
              storage.set_string("font", theme::font_choice());
          }
          storage.set_string("anim_bg", b(self.anim_bg));
@@ -4025,10 +4164,13 @@ index 252e6b9..cce467f 100644
 +        storage.set_string("np_gradient", b(self.np_gradient));
 +        storage.set_string("swipe_nav", b(self.swipe_nav));
 +        storage.set_string("swipe_invert", b(self.swipe_invert));
++        storage.set_string("swipe_skip", b(self.swipe_skip));
++        storage.set_string("marquee", b(self.marquee));
++        storage.set_string("pins", serde_json::to_string(&self.pins).unwrap_or_default());
          storage.set_string("reactive_bg", b(self.reactive_bg));
          storage.set_string("disable_blur", b(self.disable_blur));
          storage.set_string("animated_artwork", b(self.animated_artwork));
-@@ -2543,6 +2675,43 @@ struct PlayingAs {
+@@ -2543,6 +2782,43 @@ struct PlayingAs {
  }
  
  
@@ -4095,7 +4237,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..3fabad2 100644
+index 28fc376..eb14fb5 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -70,6 +70,9 @@ pub fn overlay(app: &mut App, ctx: &egui::Context, now: f64) {
@@ -4458,7 +4600,7 @@ index 28fc376..3fabad2 100644
              }
          }
          // A handoff still shows the outgoing song; the stats are the incoming one's.
-@@ -815,11 +972,25 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -815,11 +972,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let x0 = art.left();
      let info_y = art.bottom() + 22.0;
      // The Best Part disc, the star and the ⋯ menu share the information line's right end.
@@ -4482,11 +4624,12 @@ index 28fc376..3fabad2 100644
 +        let gw = widgets::galley(ui, &name, theme::bold(17.0), Color32::WHITE, title_w).size().x;
 +        art.center().x - (gw + if explicit { 20.0 } else { 0.0 }) / 2.0
 +    };
-+    let tr = text_at(ui, pos2(title_x, info_y), &name, theme::bold(17.0), Color32::WHITE, title_w);
++    let over_title = ui.rect_contains_pointer(Rect::from_min_size(pos2(art.center().x - title_w / 2.0, info_y - 2.0), vec2(title_w, 26.0)));
++    let tr = widgets::text_marquee(ui, pos2(title_x, info_y), &name, theme::bold(17.0), Color32::WHITE, title_w, over_title);
      // The name is the way into the song's own sheet — the ⋯ menu no longer carries it.
      let about = ui.interact(tr.expand2(vec2(0.0, 3.0)), ui.scope_id().with("np-about"), Sense::click());
      let about = named(about, "About song").on_hover_cursor(egui::CursorIcon::PointingHand);
-@@ -841,7 +1012,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -841,7 +1013,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          line = format!("{line} — {}", album.name);
      }
      let line_w = text_w;
@@ -4496,7 +4639,7 @@ index 28fc376..3fabad2 100644
      // The album after the em dash opens its page too, underlined like the artists.
      if let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty())
          && let Some(id) = album.id.clone()
-@@ -865,13 +1037,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -865,13 +1038,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              }
          }
      }
@@ -4516,7 +4659,7 @@ index 28fc376..3fabad2 100644
          let bresp = ui.interact(disc_r, ui.scope_id().with("np-best-part"), Sense::click());
          let bresp = named(bresp, "Best Part").on_hover_text("Skip to the part of the song people replay most").on_hover_cursor(egui::CursorIcon::PointingHand);
          let bh = theme::anim_bool(ui.ctx(), bresp.id.with("h"), bresp.hovered(), 0.1) * bp;
-@@ -886,7 +1063,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -886,7 +1064,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // The star: a 30 px disc that washes under the pointer and fills in the accent
      // once liked. The ⋯ menu sits at the line's end, as on music.youtube.com.
      let liked = app.liked.contains(&heard.id);
@@ -4525,7 +4668,7 @@ index 28fc376..3fabad2 100644
      let sr = ui.interact(star, ui.scope_id().with(("np-like", &heard.id)), Sense::click());
      let sr = named(sr, if liked { "Remove from favourites" } else { "Add to favourites" }).on_hover_cursor(egui::CursorIcon::PointingHand);
      let sh = theme::anim_bool(ui.ctx(), sr.id.with("h"), sr.hovered(), 0.1);
-@@ -905,11 +1082,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -905,11 +1083,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          // The other half of the star: a right click tells YouTube the song isn't wanted.
          app.actions.push(Action::Dislike(heard.clone()));
      } else if sr.clicked() {
@@ -4543,7 +4686,7 @@ index 28fc376..3fabad2 100644
  
      // Seek: a 4 px line that grows under the pointer, its times below.
      let status = app.audio.status.clone();
-@@ -944,49 +1126,63 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -944,49 +1127,63 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // Transport first, because its measures set the step under the times line: the row is
      // spread over the sleeve's own width — the outer pair a hair inside its edges, the
      // skips a little under a quarter of the side out from the play button.
@@ -4620,7 +4763,7 @@ index 28fc376..3fabad2 100644
      }
      // While the two songs blend, its name sits there instead.
      let mixed = theme::anim_bool(ui.ctx(), "np-automix-on", app.mixing(), 0.3);
-@@ -1009,7 +1205,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1009,7 +1206,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
  
      // Transport: the reference's row — shuffle, previous, play, next, repeat, spread over
      // the sleeve's own width.
@@ -4629,7 +4772,7 @@ index 28fc376..3fabad2 100644
      // The marks are primary white, an off shuffle or repeat tertiary; a pressed button
      // shrinks to 90%, as the reference's does.
      let ink = |h: f32, base: f32, on: f32| theme::with_alpha(theme::lerp_color(theme::with_alpha(Color32::WHITE, base), Color32::WHITE, h), on);
-@@ -1023,26 +1219,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1023,26 +1220,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -4661,7 +4804,7 @@ index 28fc376..3fabad2 100644
      let mark = ink(h, 1.0, dim);
      let morph = theme::anim_bool(ui.ctx(), "np-play-morph", app.playing() || app.buffering, 0.18);
      if app.buffering {
-@@ -1064,7 +1260,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1064,7 +1261,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.toggle();
      }
      let (r, h, p) = btn(ui, 3, "next", "Next", enabled);
@@ -4670,7 +4813,7 @@ index 28fc376..3fabad2 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1076,8 +1272,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1076,8 +1273,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let looping = app.queue.repeat != Repeat::Off;
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
@@ -4681,7 +4824,7 @@ index 28fc376..3fabad2 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1085,6 +1281,11 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1085,6 +1282,11 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              Repeat::One => Repeat::Off,
          };
      }
@@ -4693,7 +4836,7 @@ index 28fc376..3fabad2 100644
  }
  
  /// The Best Part mark: the music note the button has always carried, with the skip mark
-@@ -1267,7 +1468,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+@@ -1267,7 +1469,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
  fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
      let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
      let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
@@ -4702,7 +4845,7 @@ index 28fc376..3fabad2 100644
          ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
          ui.add_space(14.0);
          let style = &app.look().lyrics;
-@@ -1317,7 +1518,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1317,7 +1519,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
          let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
          let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
          ui.set_max_height(max_height);
@@ -4711,8 +4854,60 @@ index 28fc376..3fabad2 100644
              ui.add_space(4.0);
              if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
                  // First in the menu, so unfolding it only ever adds rows below the ⋯:
+@@ -1356,6 +1558,29 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+             if widgets::menu_action(ui, Some(icon::THUMBS_DOWN), "Dislike") {
+                 app.actions.push(Action::Dislike(track.clone()));
+             }
++            // Sleep timer: the music stops after a while, fading out over its last seconds.
++            let now = ui.input(|i| i.time);
++            let sleep_id = ui.scope_id().with("sleep-open");
++            let mut sleep_open = ui.ctx().data(|d| d.get_temp::<bool>(sleep_id)).unwrap_or(false);
++            let sleep_name = match app.sleep_label(now) {
++                Some(s) => format!("Sleep timer · {s}"),
++                None => "Sleep timer".to_owned(),
++            };
++            if expand_row(ui, &sleep_name, sleep_open) {
++                sleep_open = !sleep_open;
++                ui.ctx().data_mut(|d| d.insert_temp(sleep_id, sleep_open));
++            }
++            if sleep_open {
++                if app.sleep_pick.is_some() && sleep_row(ui, "Turn off", false) {
++                    app.sleep_cancel();
++                }
++                for (label, minutes) in [("15 minutes", 15u32), ("30 minutes", 30), ("45 minutes", 45), ("1 hour", 60), ("End of this song", 0)] {
++                    if sleep_row(ui, label, app.sleep_pick == Some(minutes)) {
++                        app.sleep_set(now, minutes);
++                    }
++                }
++                ui.ctx().request_repaint_after(Duration::from_millis(500));
++            }
+             // Both shares answer for the same song — its own address and a card of its
+             // lyrics — so they sit in one section.
+             menu_divider(ui);
+@@ -1373,6 +1598,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+     });
+ }
+ 
++/// One choice of the sleep timer, with a tick on the one that's set.
++fn sleep_row(ui: &mut Ui, label: &str, on: bool) -> bool {
++    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click());
++    let resp = named(resp, label).on_hover_cursor(egui::CursorIcon::PointingHand);
++    let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), resp.hovered(), 0.12);
++    if h > 0.0 {
++        ui.painter().rect_filled(rect, 8.0, theme::glass(0.08 * h));
++    }
++    ui.painter().text(pos2(rect.left() + 26.0, rect.center().y), egui::Align2::LEFT_CENTER, label, theme::regular(13.5), if on { theme::text() } else { theme::text_dim() });
++    if on {
++        widgets::icon_at(ui, pos2(rect.right() - 18.0, rect.center().y), icon::CHECK, 16.0, theme::text());
++    }
++    resp.clicked()
++}
++
+ fn lyric_options(app: &mut App, ui: &mut Ui) {
+     let Some((id, set)) = app.lyrics.as_ref() else { return };
+     let id = id.clone();
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7..20fc2de 100644
+index 899a3c7..5b0886f 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
 @@ -65,18 +65,28 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
@@ -5212,12 +5407,16 @@ index 899a3c7..20fc2de 100644
                      ui.add_space(4.0);
                      for (code, name) in super::lyric_prefs::LANGUAGES {
                          let on = app.lyric_prefs.target == *code;
-@@ -3418,6 +3755,18 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
+@@ -3418,6 +3755,22 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.page_blobs, "Blobs on pages");
          });
          divider(ui);
 +        setting_row(ui, "Home background follows the cover", Some("A gradient of the carousel's cover colour behind Home. Off keeps it black."), |ui| {
 +            toggle(ui, &mut app.home_tint, "Home background follows the cover");
++        });
++        divider(ui);
++        setting_row(ui, "Scroll long titles on hover", Some("A song title that doesn't fit slides to show its end while the pointer rests on it."), |ui| {
++            toggle(ui, &mut app.marquee, "Scroll long titles on hover");
 +        });
 +        divider(ui);
 +        setting_row(ui, "Gradient player background", Some("Now Playing's flat background becomes a soft gradient of several colours taken from the cover. Off keeps it flat."), |ui| {
@@ -5231,7 +5430,7 @@ index 899a3c7..20fc2de 100644
          setting_row(ui, "Colour icons to the song", Some("The marks — play, shuffle, repeat, the progress bar — take the sleeve's colour. Off keeps the app's own."), |ui| {
              toggle(ui, &mut app.icon_tint, "Colour icons to the song");
          });
-@@ -3491,6 +3840,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3491,6 +3844,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.anim_bg, "Animated background");
          });
          divider(ui);
@@ -5246,7 +5445,7 @@ index 899a3c7..20fc2de 100644
          setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
              toggle(ui, &mut app.reactive_bg, "Pulse with the music");
          });
-@@ -3499,7 +3856,6 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3499,7 +3860,6 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.show_nerd_stats, "Stats for nerds");
          });
      });
@@ -5254,7 +5453,7 @@ index 899a3c7..20fc2de 100644
  }
  
  /// Settings › Window.
-@@ -3511,8 +3867,12 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
+@@ -3511,8 +3871,16 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.close_to_tray, "Close to tray");
          });
          divider(ui);
@@ -5264,12 +5463,16 @@ index 899a3c7..20fc2de 100644
 +            toggle(ui, &mut app.swipe_nav, "Swipe to go back and forward");
 +        });
 +        divider(ui);
++        setting_row(ui, "Swipe to change song in the player", Some("In Now Playing, two fingers across the touchpad play the previous song (right) or the next one (left)."), |ui| {
++            toggle(ui, &mut app.swipe_skip, "Swipe to change song in the player");
++        });
++        divider(ui);
 +        setting_row(ui, "Reverse the swipe direction", Some("For touchpads set to natural scrolling the other way round: right goes forward, left goes back."), |ui| {
 +            toggle(ui, &mut app.swipe_invert, "Reverse the swipe direction");
          });
          divider(ui);
          let api = crate::renderer::api_name();
-@@ -3593,8 +3953,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3593,8 +3961,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
                      });
                  });
                  divider(ui);
@@ -5280,7 +5483,7 @@ index 899a3c7..20fc2de 100644
                  });
              }
          });
-@@ -3609,7 +3969,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3609,7 +3977,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
          let busy = app.lastfm_busy.load(Ordering::Relaxed);
          let desc = match &app.lastfm_user {
              Some(name) => format!("Scrobbling what you play to {name}'s profile."),
@@ -5289,7 +5492,7 @@ index 899a3c7..20fc2de 100644
              None => "Scrobble what you play to your Last.fm profile.".to_owned(),
          };
          let (mut connect, mut disconnect) = (false, false);
-@@ -3722,7 +4082,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3722,7 +4090,7 @@ fn network(app: &mut App, ui: &mut Ui) {
      use crate::proxy::{self, Setting};
      let same = |a: &Setting, b: &Setting| std::mem::discriminant(a) == std::mem::discriminant(b);
      let mut pick = None;
@@ -5298,7 +5501,7 @@ index 899a3c7..20fc2de 100644
          let btn = dropdown_button(ui, app.proxy_mode.label(), 220.0, "Proxy");
          egui::Popup::menu(&btn).show(|ui| {
              ui.set_width(220.0);
-@@ -3754,7 +4114,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3754,7 +4122,7 @@ fn network(app: &mut App, ui: &mut Ui) {
              divider(ui);
              let desc = match proxy::system() {
                  Some(p) => format!("Windows is set to use {}.", proxy::redact(&p)),
@@ -5307,7 +5510,7 @@ index 899a3c7..20fc2de 100644
              };
              setting_row(ui, "Windows proxy", Some(&desc), |_| {});
          }
-@@ -3844,7 +4204,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
+@@ -3844,7 +4212,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(220.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -5316,7 +5519,7 @@ index 899a3c7..20fc2de 100644
              ui.add_space(4.0);
              let mut row = |ui: &mut Ui, label: &str, value: &str| {
                  let on = current.eq_ignore_ascii_case(value);
-@@ -3907,7 +4267,7 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
+@@ -3907,7 +4275,7 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(340.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -5325,7 +5528,7 @@ index 899a3c7..20fc2de 100644
              ui.add_space(4.0);
              if option_row(ui, SYSTEM_DEFAULT, app.output_device.is_none()).clicked() {
                  pick = Some(None);
-@@ -3993,15 +4353,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
+@@ -3993,15 +4361,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
      if !s.shown {
          return;
      }
@@ -5890,10 +6093,10 @@ index 0000000..80bdf75
 +}
 diff --git a/src/ui/tabbar.rs b/src/ui/tabbar.rs
 new file mode 100644
-index 0000000..827a508
+index 0000000..f0d48d4
 --- /dev/null
 +++ b/src/ui/tabbar.rs
-@@ -0,0 +1,367 @@
+@@ -0,0 +1,423 @@
 +//! The floating tab bar, after Mochy Music's Android navigation bar.
 +//!
 +//! A stadium of dark frosted glass hung above the player. One glyph per tab, outline
@@ -5965,6 +6168,17 @@ index 0000000..827a508
 +        // New, Downloaded and Transfer were sidebar rows: they live under Library now.
 +        Page::Library(_) | Page::Downloads | Page::Local | Page::New | Page::Transfer => Some(2),
 +        Page::Settings => Some(3),
++        _ => None,
++    }
++}
++
++/// What a pin is known by: its kind and id. Songs can't be pinned.
++pub fn pin_key(t: &crate::model::Target) -> Option<String> {
++    use crate::model::Target;
++    match t {
++        Target::Album(id) => Some(format!("a:{id}")),
++        Target::Playlist(id) => Some(format!("p:{id}")),
++        Target::Artist(id) => Some(format!("r:{id}")),
 +        _ => None,
 +    }
 +}
@@ -6116,9 +6330,12 @@ index 0000000..827a508
 +
 +fn bar(app: &mut App, ui: &mut Ui, room: f32) {
 +    let ctx = ui.ctx().clone();
-+    let lists = rail_playlists(app);
-+    // Favourite Songs leads the list; the rest follow.
-+    let rows = lists.len() + usize::from(app.logged_in);
++    let pins: Vec<crate::model::Card> = app.pins.clone();
++    let pinned_keys: Vec<String> = pins.iter().filter_map(|c| pin_key(&c.target)).collect();
++    // A playlist that is pinned stands once, among the pins.
++    let lists: Vec<_> = rail_playlists(app).into_iter().filter(|(id, ..)| !pinned_keys.contains(&format!("p:{id}"))).collect();
++    // Favourite Songs leads the list, then the pins; the rest follow.
++    let rows = lists.len() + pins.len() + usize::from(app.logged_in);
 +    let list_h = rows as f32 * ROW;
 +    let want = LOGO_H + if rows > 0 { TABS_H + 12.0 + list_h + PAD } else { TABS_H };
 +    let h = want.min(room);
@@ -6205,6 +6422,8 @@ index 0000000..827a508
 +    );
 +    let area = Rect::from_min_max(pos2(rect.left(), line_y + 6.0), pos2(rect.right(), rect.bottom() - PAD));
 +    let mut hide: Option<String> = None;
++    let mut unpin: Option<crate::model::Card> = None;
++    let mut pin_open: Option<crate::model::Target> = None;
 +    let mut open_target: Option<Page> = None;
 +    ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
 +        egui::ScrollArea::vertical().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -6214,6 +6433,7 @@ index 0000000..827a508
 +            .show(ui, |ui| {
 +                ui.spacing_mut().item_spacing.y = 0.0;
 +                // Favourite Songs.
++                if app.logged_in {
 +                let liked = Page::Playlist(super::LIKED_MUSIC.to_owned());
 +                let (cell, resp) = ui.allocate_exact_size(vec2(W, ROW), Sense::click());
 +                let resp = widgets::named(resp, "Favourite Songs").on_hover_text("Favourite Songs").on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -6227,6 +6447,39 @@ index 0000000..827a508
 +                }
 +                if resp.clicked() {
 +                    open_target = Some(liked);
++                }
++                }
++                // The pins: playlists, albums and artists the listener chose to keep close.
++                for card in &pins {
++                    let (cell, resp) = ui.allocate_exact_size(vec2(W, ROW), Sense::click());
++                    if !ui.is_rect_visible(cell) {
++                        continue;
++                    }
++                    let resp = widgets::named(resp, &card.title).on_hover_text(&card.title).on_hover_cursor(egui::CursorIcon::PointingHand);
++                    let h = theme::anim_bool(&ctx, resp.id.with("h"), resp.hovered(), 0.15);
++                    let sel = match &card.target {
++                        crate::model::Target::Playlist(id) => app.page == Page::Playlist(id.clone()),
++                        crate::model::Target::Album(id) => app.page == Page::Album(id.clone()),
++                        crate::model::Target::Artist(id) => app.page == Page::Artist(id.clone()),
++                        _ => false,
++                    };
++                    let c = Rect::from_center_size(cell.center(), vec2(COVER, COVER)).expand(1.5 * h);
++                    let round = matches!(card.target, crate::model::Target::Artist(_));
++                    let radius = if round { c.width() / 2.0 } else { 11.0 };
++                    widgets::paint_cover(ui, c, &card.thumbs, radius, 1.0);
++                    if sel {
++                        ui.painter().rect_stroke(c.expand(2.0), radius + 2.0, egui::Stroke::new(1.5, theme::text()), egui::StrokeKind::Outside);
++                    }
++                    egui::Popup::context_menu(&resp).show(|ui| {
++                        ui.set_min_width(190.0);
++                        if ui.button("Unpin from sidebar").clicked() {
++                            unpin = Some(card.clone());
++                            ui.close();
++                        }
++                    });
++                    if resp.clicked() {
++                        pin_open = Some(card.target.clone());
++                    }
 +                }
 +                for (id, title, thumbs) in &lists {
 +                    let (cell, resp) = ui.allocate_exact_size(vec2(W, ROW), Sense::click());
@@ -6256,6 +6509,12 @@ index 0000000..827a508
 +    });
 +    if let Some(id) = hide {
 +        app.hidden_playlists.insert(id);
++    }
++    if let Some(c) = unpin {
++        app.actions.push(Action::TogglePin(c));
++    }
++    if let Some(t) = pin_open {
++        app.actions.push(Action::Open(t));
 +    }
 +    if let Some(Page::Playlist(id)) = open_target {
 +        app.actions.push(Action::Open(crate::model::Target::Playlist(id)));
@@ -6424,10 +6683,45 @@ index 821455d..24eb8aa 100644
      if open {
          app.actions.push(Action::Go(Page::Transfer));
 diff --git a/src/ui/widgets.rs b/src/ui/widgets.rs
-index f44bea1..1e7c4b8 100644
+index f44bea1..2f56c5b 100644
 --- a/src/ui/widgets.rs
 +++ b/src/ui/widgets.rs
-@@ -199,7 +199,7 @@ pub fn icon_button(ui: &mut Ui, glyph: char, size: f32, name: &str, active: bool
+@@ -88,6 +88,34 @@ pub fn text_at(ui: &Ui, pos: Pos2, text: &str, font: egui::FontId, color: Color3
+     rect
+ }
+ 
++/// `text_at`, but a title too long for `width` slides to show its end while `hover` holds
++/// (when the setting is on): a short wait, then back and forth at a walking pace.
++pub fn text_marquee(ui: &Ui, pos: Pos2, text: &str, font: egui::FontId, color: Color32, width: f32, hover: bool) -> Rect {
++    let on = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("marquee-on"))).unwrap_or(false);
++    if !on || crate::bidi::has_rtl(text) {
++        return text_at(ui, pos, text, font, color, width);
++    }
++    let full = galley(ui, text, font.clone(), color, 4000.0);
++    let over = full.size().x - width;
++    let key = egui::Id::new(("marquee-start", text));
++    if over <= 1.0 || !hover {
++        ui.ctx().data_mut(|d| d.remove::<f64>(key));
++        return text_at(ui, pos, text, font, color, width);
++    }
++    let now = ui.input(|i| i.time);
++    let start = ui.ctx().data_mut(|d| *d.get_temp_mut_or_insert_with(key, || now));
++    let t = (now - start - 0.5).max(0.0) as f32;
++    let hold = 50.0;
++    let period = 2.0 * (over + hold);
++    let u = (t * 40.0) % period;
++    let off = if u < over + hold { u.min(over) } else { (period - u).min(over) };
++    let h = full.size().y;
++    let clip = Rect::from_min_size(pos, vec2(width, h)).intersect(ui.clip_rect());
++    ui.painter().with_clip_rect(clip).galley(pos - vec2(off, 0.0), full, color);
++    ui.ctx().request_repaint();
++    Rect::from_min_size(pos, vec2(width, h))
++}
++
+ /// Single-line text whose artist names are links: underlined on hover, and a click
+ /// opens the artist's page. Names without a channel id stay plain text.
+ #[allow(clippy::too_many_arguments)]
+@@ -199,7 +227,7 @@ pub fn icon_button(ui: &mut Ui, glyph: char, size: f32, name: &str, active: bool
          ui.painter().circle_filled(rect.center(), d / 2.0, theme::glass(0.10 * h));
      }
      let color = if active { theme::text() } else { theme::lerp_color(theme::text_dim(), theme::text(), h) };
@@ -6436,7 +6730,7 @@ index f44bea1..1e7c4b8 100644
      icon_at(ui, rect.center(), glyph, size * press, color);
      resp
  }
-@@ -239,7 +239,9 @@ fn pill_mark(ui: &mut Ui, label: &str, mark: Option<Mark>, primary: bool, height
+@@ -239,7 +267,9 @@ fn pill_mark(ui: &mut Ui, label: &str, mark: Option<Mark>, primary: bool, height
      } else {
          (theme::glass(0.10 + 0.08 * h), theme::text())
      };
@@ -6447,7 +6741,7 @@ index f44bea1..1e7c4b8 100644
      ui.painter().rect_filled(r, height / 2.0, fill);
      let mut x = r.left() + 18.0 * s;
      if let Some(mark) = mark {
-@@ -371,6 +373,39 @@ pub fn paint_cover_px(ui: &Ui, rect: Rect, thumbs: &[Thumb], radius: f32, zoom:
+@@ -371,6 +401,39 @@ pub fn paint_cover_px(ui: &Ui, rect: Rect, thumbs: &[Thumb], radius: f32, zoom:
      paint_remote(ui, &url, rect, radius, uv, Color32::WHITE);
  }
  
@@ -6487,7 +6781,7 @@ index f44bea1..1e7c4b8 100644
  /// Paint the cover cropped to fill `rect` (any aspect), tinted, for full-bleed backdrops.
  pub fn paint_cover_fill(ui: &Ui, rect: Rect, thumbs: &[Thumb], tint: Color32) {
      let ppp = ui.ctx().pixels_per_point();
-@@ -604,6 +639,19 @@ pub fn card(ui: &mut Ui, c: &Card, width: f32, liked: bool, acts: &mut Vec<Actio
+@@ -604,6 +667,19 @@ pub fn card(ui: &mut Ui, c: &Card, width: f32, liked: bool, acts: &mut Vec<Actio
  /// [`card`] at a shape other than the square sleeve. Motion only plays on a square
  /// tile: a sleeve is cut from square art.
  pub fn card_shape(ui: &mut Ui, c: &Card, width: f32, shape: Shape, liked: bool, acts: &mut Vec<Action>, sprite: Option<&MotionSprite>) {
@@ -6507,7 +6801,7 @@ index f44bea1..1e7c4b8 100644
      let art_h = width * shape.aspect();
      let (rect, resp) = ui.allocate_exact_size(vec2(width, shape.height(width)), Sense::click());
      if !ui.is_rect_visible(rect) {
-@@ -623,9 +671,9 @@ pub fn card_shape(ui: &mut Ui, c: &Card, width: f32, shape: Shape, liked: bool,
+@@ -623,9 +699,9 @@ pub fn card_shape(ui: &mut Ui, c: &Card, width: f32, shape: Shape, liked: bool,
          theme::card_radius().min(art_h / 2.0).min(width / 2.0)
      };
      if shape == Shape::Square {
@@ -6519,7 +6813,7 @@ index f44bea1..1e7c4b8 100644
      }
      // The motion sleeve plays over the still, under the hover shade and play button.
      if let Some(s) = sprite {
-@@ -646,21 +694,25 @@ pub fn card_shape(ui: &mut Ui, c: &Card, width: f32, shape: Shape, liked: bool,
+@@ -646,21 +722,25 @@ pub fn card_shape(ui: &mut Ui, c: &Card, width: f32, shape: Shape, liked: bool,
      let rise = 6.0 * (1.0 - h);
      let poster = shape == Shape::Poster;
      let edge = inset + disc / 2.0;
@@ -6549,7 +6843,20 @@ index f44bea1..1e7c4b8 100644
          play_hit = p.clicked();
          if !poster {
              let mc = img.right_bottom() + vec2(-edge, -edge + rise);
-@@ -861,7 +913,7 @@ pub fn menu_popup(popup: egui::Popup<'_>, width: f32, add: impl FnOnce(&mut Ui))
+@@ -724,6 +804,12 @@ pub(crate) fn card_menu_contents(ui: &mut Ui, c: &Card, liked: bool, acts: &mut
+             if menu_action(ui, None, "Open") {
+                 acts.push(Action::Open(t.clone()));
+             }
++            if let Some(key) = super::tabbar::pin_key(t) {
++                let pinned = ui.ctx().data(|d| d.get_temp::<Vec<String>>(egui::Id::new("pinned-keys"))).unwrap_or_default().contains(&key);
++                if menu_action(ui, Some(if pinned { icon::PIN_OFF } else { icon::PIN }), if pinned { "Unpin from sidebar" } else { "Pin to sidebar" }) {
++                    acts.push(Action::TogglePin(c.clone()));
++                }
++            }
+             ui.separator();
+             if menu_action(ui, None, "Copy link") {
+                 acts.push(Action::Share(t.clone()));
+@@ -861,7 +947,7 @@ pub fn menu_popup(popup: egui::Popup<'_>, width: f32, add: impl FnOnce(&mut Ui))
          // The popup's own frame padding: the rows have to fit inside it, not just in the window.
          let pad = egui::Frame::popup(ui.style()).total_margin().sum().y;
          let max_h = (room - pad - 6.0).max(96.0);
@@ -6558,6 +6865,15 @@ index f44bea1..1e7c4b8 100644
      });
  }
  
+@@ -1201,7 +1287,7 @@ pub fn track_row(ui: &mut Ui, t: &Track, o: &RowOpts, acts: &mut Vec<Action>) ->
+         (sub, _) => sub,
+     };
+     let title_y = if sub.is_some() { cy - 18.0 } else { cy - 9.0 };
+-    text_at(ui, pos2(x, title_y), &t.title, theme::semibold(14.5), title_col, title_w);
++    text_marquee(ui, pos2(x, title_y), &t.title, theme::semibold(14.5), title_col, title_w, base.contains_pointer());
+     if let Some(sub) = &sub {
+         // An artist page's row links the release under its title; every other row links
+         // the artists the line names.
 diff --git a/src/ytmapi.rs b/src/ytmapi.rs
 index 90e66f6..fb467b9 100644
 --- a/src/ytmapi.rs
