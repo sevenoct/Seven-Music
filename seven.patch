@@ -2503,10 +2503,12 @@ index 499f22240f1bad29448361a3eb61fab7d2fdbe6e..c97541a43e802df5b3b025f200f03773
 +const TEXT_DIM: Color32 = Color32::from_rgb(176, 176, 176);
 +const TEXT_FAINT: Color32 = Color32::from_rgb(128, 128, 128);
  /// Light mode's counterparts.
- const BG_LIGHT: Color32 = Color32::from_rgb(246, 244, 248);
+-const BG_LIGHT: Color32 = Color32::from_rgb(246, 244, 248);
++const BG_LIGHT: Color32 = Color32::from_rgb(208, 209, 214);
  const TEXT_LIGHT: Color32 = Color32::from_rgb(22, 20, 26);
 @@ -18,6 +18,8 @@ const TEXT_DIM_LIGHT: Color32 = Color32::from_rgb(86, 82, 94);
- const TEXT_FAINT_LIGHT: Color32 = Color32::from_rgb(124, 118, 132);
+-const TEXT_FAINT_LIGHT: Color32 = Color32::from_rgb(124, 118, 132);
++const TEXT_FAINT_LIGHT: Color32 = Color32::from_rgb(96, 92, 104);
  /// Default accent until a cover provides one (BitChord pink).
  pub const RED: Color32 = Color32::from_rgb(0xFA, 0x58, 0x6A);
 +/// Mochy's accent: its primary, a light grey (Theme.kt `primary = 0xFFE0E0E0`).
@@ -2519,13 +2521,13 @@ index 499f22240f1bad29448361a3eb61fab7d2fdbe6e..c97541a43e802df5b3b025f200f03773
  /// has already painted, so the frost is a dense material rather than a blurred copy.
  pub fn menu_fill() -> Color32 {
 -    if light() { Color32::from_rgba_unmultiplied(250, 250, 252, 238) } else { Color32::from_rgba_unmultiplied(28, 28, 30, 238) }
-+    if light() { Color32::from_rgba_unmultiplied(250, 250, 252, 238) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 226) }
++    if light() { Color32::from_rgba_unmultiplied(222, 223, 228, 238) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 226) }
  }
  
  /// Dialogs and cards that float over the page.
  pub fn surface_fill() -> Color32 {
 -    if light() { Color32::from_rgba_unmultiplied(250, 250, 252, 246) } else { Color32::from_rgba_unmultiplied(24, 24, 26, 244) }
-+    if light() { Color32::from_rgba_unmultiplied(250, 250, 252, 246) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 236) }
++    if light() { Color32::from_rgba_unmultiplied(220, 221, 226, 246) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 236) }
  }
  
  /// Theme preset multiplier for every glass surface (f32 bits; 1.0 by default).
@@ -6176,7 +6178,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..6035ca46032b4cb5f4282645068e0cda
 +    let top = app.stats.top_artists(1).into_iter().next().map(|a| a.0).unwrap_or_else(|| "—".to_owned());
 +    ui.add_space(6.0);
 +    egui::Frame::new()
-+        .fill(if theme::light() { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 235) } else { egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226) })
++        .fill(if theme::light() { egui::Color32::from_rgba_unmultiplied(224, 225, 230, 235) } else { egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226) })
 +        .stroke(egui::Stroke::new(1.0, if theme::light() { egui::Color32::from_black_alpha(26) } else { egui::Color32::from_white_alpha(28) }))
 +        .corner_radius(theme::panel_radius())
 +        .inner_margin(egui::Margin::symmetric(22, 20))
@@ -6300,7 +6302,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..6035ca46032b4cb5f4282645068e0cda
 +    }
 +    section_label(ui, "About Seven", None);
 +    egui::Frame::new()
-+        .fill(if theme::light() { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 235) } else { egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226) })
++        .fill(if theme::light() { egui::Color32::from_rgba_unmultiplied(224, 225, 230, 235) } else { egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226) })
 +        .stroke(egui::Stroke::new(1.0, if theme::light() { egui::Color32::from_black_alpha(30) } else { egui::Color32::from_white_alpha(40) }))
 +        .corner_radius(theme::panel_radius())
 +        .inner_margin(egui::Margin::symmetric(24, 28))
