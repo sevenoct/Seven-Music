@@ -3046,10 +3046,10 @@ index 288ad8c..4696a38 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 0000000..b5b32ae
+index 0000000..a8383bf
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,497 @@
+@@ -0,0 +1,504 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! One wide card at the top of Home. It stands on a heavily softened copy of the cover
@@ -3533,12 +3533,19 @@ index 0000000..b5b32ae
 +        let art = Rect::from_min_size(rect.min + vec2(10.0, (rect.height() - 44.0) / 2.0), vec2(44.0, 44.0));
 +        widgets::paint_cover(&cu, art, &t.thumbs, 10.0, 1.0);
 +        let x = art.right() + 12.0;
-+        let tw = (rect.right() - x - 26.0).max(20.0);
++        let tw = (rect.right() - x - 46.0).max(20.0);
 +        widgets::text_at(&cu, pos2(x, rect.center().y - 19.0), &t.title, theme::semibold(14.0), theme::text(), tw);
 +        widgets::text_at(&cu, pos2(x, rect.center().y + 3.0), &t.artist_line(), theme::regular(12.5), theme::text_dim(), tw);
 +        if playing.as_deref() == Some(t.id.as_str()) {
-+            cu.painter().circle_filled(pos2(rect.right() - 16.0, rect.center().y), 3.5, accent);
++            cu.painter().circle_filled(pos2(rect.right() - 46.0, rect.center().y), 3.5, accent);
 +        }
++        // Options dots at the card's end, and the same menu on a right click.
++        let dots = Rect::from_center_size(pos2(rect.right() - 22.0, rect.center().y), egui::Vec2::splat(30.0));
++        let more = widgets::more_button(&mut cu, dots, egui::Id::new(("jump-more", &t.id)), "Song options");
++        let liked = app.liked.contains(&t.id);
++        let acts = &mut app.actions;
++        widgets::menu_popup(egui::Popup::menu(&more), widgets::MENU_W, |ui| widgets::song_menu(ui, t, liked, None, None, acts));
++        widgets::menu_popup(egui::Popup::context_menu(&resp), widgets::MENU_W, |ui| widgets::song_menu(ui, t, liked, None, None, acts));
 +        if resp.clicked() {
 +            play = Some(t.clone());
 +        }
@@ -5197,7 +5204,7 @@ index 899a3c7..1270252 100644
      if !settings_group_shown(ui) {
          return;
 diff --git a/src/ui/shell.rs b/src/ui/shell.rs
-index 96240d4..9d4d705 100644
+index 96240d4..ed90b89 100644
 --- a/src/ui/shell.rs
 +++ b/src/ui/shell.rs
 @@ -61,7 +61,8 @@ pub fn base_color(app: &App) -> Color32 {
@@ -5278,7 +5285,81 @@ index 96240d4..9d4d705 100644
      if !app.loading {
          return;
      }
-@@ -872,6 +888,39 @@ pub fn grey_frost(app: &App, ui: &Ui, rect: Rect, radius: f32, alpha: f32) {
+@@ -651,7 +667,11 @@ pub fn suggestions(app: &mut App, ctx: &egui::Context) {
+     // An off-screen test window never gets the OS's focus, so YTM_SUGGESTIONS holds the
+     // list open the way a click would.
+     let focused = app.search_focused || app.forget_held || super::dev_var("YTM_SUGGESTIONS").is_some();
+-    let show = focused && !app.suggestions.1.is_empty() && !app.np_open;
++    // A song row's own menu (its dots or a right click) keeps the list standing while it
++    // is open: using it takes the search box's focus away.
++    let menu_id = egui::Id::new("suggest-menu-open");
++    let menu_open = ctx.data(|d| d.get_temp::<bool>(menu_id)).unwrap_or(false);
++    let show = (focused || menu_open) && !app.suggestions.1.is_empty() && !app.np_open;
+     let t = theme::anim_bool(ctx, "suggest-open", show, 0.15);
+     if t <= 0.0 {
+         return;
+@@ -677,6 +697,7 @@ pub fn suggestions(app: &mut App, ctx: &egui::Context) {
+                         app.search_refocus = true;
+                     }
+                     let now = ui.input(|i| i.time);
++                    let mut any_menu = false;
+                     for (i, s) in app.suggestions.1.clone().into_iter().enumerate() {
+                         let term = s.text;
+                         // The removed one folds away, and the rows below slide up into its place.
+@@ -716,7 +737,8 @@ pub fn suggestions(app: &mut App, ctx: &egui::Context) {
+                                 // Artists are discs, releases and clips are sleeves.
+                                 let circle = matches!(t.target, Target::Artist(_));
+                                 paint_cover(ui, art, &t.thumbs, if circle { 20.0 } else { 6.0 }, 1.0);
+-                                let room = if t.explicit { 96.0 } else { 72.0 };
++                                // A song carries its options dots at the row's end.
++                                let room = if t.explicit { 96.0 } else { 72.0 } + if matches!(t.target, Target::Song(_)) { 40.0 } else { 0.0 };
+                                 let name = text_at(ui, pos2(r.left() + 68.0, r.center().y - 10.0), &term, theme::regular(15.0), theme::text(), r.width() - room);
+                                 if t.explicit {
+                                     let b = Rect::from_min_size(pos2(name.right() + 6.0, name.top() + 2.0), Vec2::splat(14.0));
+@@ -733,6 +755,24 @@ pub fn suggestions(app: &mut App, ctx: &egui::Context) {
+                                 suggestion_text(ui, pos2(r.left() + 42.0, r.center().y - 9.0), &term, &app.suggestions.0, r.width() - room);
+                             }
+                         }
++                        // A song the query has found: options dots, and the same menu on a right click.
++                        let mut menu_hit = false;
++                        if let Some(Target::Song(t)) = target.as_ref() {
++                            let dots = Rect::from_center_size(pos2(r.right() - 24.0, r.center().y), Vec2::splat(30.0));
++                            let more = widgets::more_button(ui, dots, resp.id.with("more"), "Song options");
++                            let liked = app.liked.contains(&t.id);
++                            let acts = &mut app.actions;
++                            widgets::menu_popup(egui::Popup::menu(&more), widgets::MENU_W, |ui| widgets::song_menu(ui, t, liked, None, None, acts));
++                            widgets::menu_popup(egui::Popup::context_menu(&resp), widgets::MENU_W, |ui| widgets::song_menu(ui, t, liked, None, None, acts));
++                            any_menu |= egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&more)) || egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
++                            // A press on the dots, or a right press on the row, must not
++                            // drop the list: hold it as the remove button does.
++                            let secondary = resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.secondary_down());
++                            if more.is_pointer_button_down_on() || more.clicked() || secondary || resp.secondary_clicked() {
++                                app.forget_held = true;
++                                menu_hit = true;
++                            }
++                        }
+                         // A past search can be removed from the account's history.
+                         if let Some(token) = s.forget {
+                             let x = Rect::from_center_size(pos2(r.right() - 22.0, r.center().y), Vec2::splat(30.0));
+@@ -762,7 +802,8 @@ pub fn suggestions(app: &mut App, ctx: &egui::Context) {
+                             }
+                         }
+                         // Pointer-down, not click: the text box loses focus (hiding this) first.
+-                        if resp.is_pointer_button_down_on() || resp.clicked() {
++                        // A left press only: the right button belongs to the row's menu.
++                        if !menu_hit && ((resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down())) || resp.clicked()) {
+                             app.suggestions = Default::default();
+                             app.search_focused = false;
+                             // A row naming a thing goes to that thing; a term searches for it.
+@@ -773,6 +814,7 @@ pub fn suggestions(app: &mut App, ctx: &egui::Context) {
+                             break;
+                         }
+                     }
++                    ui.ctx().data_mut(|d| d.insert_temp(menu_id, any_menu));
+                     if let Some((t, _)) = app.forgetting.take_if(|(_, at)| now - *at >= 0.18) {
+                         app.suggestions.1.retain(|s| s.forget.as_deref() != Some(t.as_str()));
+                     }
+@@ -872,6 +914,39 @@ pub fn grey_frost(app: &App, ui: &Ui, rect: Rect, radius: f32, alpha: f32) {
      ui.painter().rect_stroke(rect, radius, egui::Stroke::new(1.0, theme::with_alpha(theme::glass(0.16), alpha)), egui::StrokeKind::Inside);
  }
  
@@ -5318,7 +5399,7 @@ index 96240d4..9d4d705 100644
  /// An opened release's own sleeve blown up behind its page. The blur is the cover's, so
  /// the page wears its colours; it dims and fades into the page ground before the first
  /// row, so the words on top never have to fight the picture.
-@@ -891,18 +940,23 @@ pub fn cover_wash(app: &App, ui: &mut Ui, rect: Rect) {
+@@ -891,18 +966,23 @@ pub fn cover_wash(app: &App, ui: &mut Ui, rect: Rect) {
              t
          }
      };
@@ -5346,7 +5427,7 @@ index 96240d4..9d4d705 100644
  fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle, egui::TextureHandle, egui::TextureHandle)> {
      let (key, rgba) = app.frost_art.as_ref()?;
      let id = egui::Id::unique("frost-tex");
-@@ -933,37 +987,12 @@ fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle
+@@ -933,37 +1013,12 @@ fn frost_textures(app: &App, ctx: &egui::Context) -> Option<(egui::TextureHandle
      Some(t)
  }
  
@@ -5390,7 +5471,7 @@ index 96240d4..9d4d705 100644
  }
  
  /// The player: one frosted capsule floating over the bottom of the window, as in the
-@@ -974,7 +1003,6 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -974,7 +1029,6 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      if frosted {
          // The page scrolls on under this strip: fade it out rather than end it at the
          // player's edge. Clicks in the fade stay with the player, not the rows beneath.
@@ -5398,7 +5479,7 @@ index 96240d4..9d4d705 100644
          ui.interact(full, ui.id().with("player-strip"), Sense::hover());
      }
      // Apple's floating player, measured off its own page: a 52 pt pill of its own width,
-@@ -994,27 +1022,17 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -994,27 +1048,17 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      let text_w = (full.width() - 40.0 - (PAD * 2.0 + ART + 8.0 + GAP + t_w + GAP + u_w)).clamp(60.0, 200.0);
      let w = (PAD * 2.0 + ART + 8.0 + text_w + GAP + t_w + GAP + u_w).min(full.width() - 24.0);
      let cap = Rect::from_center_size(pos2(full.center().x, full.bottom() - 20.0 - H / 2.0), vec2(w, H));
@@ -5436,7 +5517,7 @@ index 96240d4..9d4d705 100644
  
      let status = app.audio.status.clone();
      // An Automix handoff keeps the outgoing song on this strip until the next one is
-@@ -1059,19 +1077,20 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1059,19 +1103,20 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      };
      let r = tbtn(ui, sh_x, "shuffle", "Shuffle");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -5459,7 +5540,7 @@ index 96240d4..9d4d705 100644
      let morph = theme::anim_bool(&ctx, "bar-play-morph", playing || app.buffering, 0.18);
      if app.buffering {
          let a = now as f32 * 6.0;
-@@ -1083,10 +1102,10 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1083,10 +1128,10 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
          // through a buffer, and a hard cut between the two weights flickers.
          let fg = ink(0.55 + 0.45 * h);
          if morph < 1.0 {
@@ -5472,7 +5553,7 @@ index 96240d4..9d4d705 100644
          }
      }
      if r.clicked() && enabled {
-@@ -1094,7 +1113,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1094,7 +1139,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      }
      let r = tbtn(ui, nx_x, "next", "Next");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -5481,7 +5562,7 @@ index 96240d4..9d4d705 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1105,7 +1124,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1105,7 +1150,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      };
      let r = tbtn(ui, rp_x, "repeat", "Repeat");
      let h = theme::anim_bool(&ctx, r.id.with("h"), r.hovered(), 0.12);
@@ -5490,7 +5571,7 @@ index 96240d4..9d4d705 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1165,6 +1184,21 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1165,6 +1210,21 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
          ui.painter().rect_filled(Rect::from_min_size(line_r.min, vec2(line_r.width() * frac, thick)), thick / 2.0, accent);
      }
      let at = |p: Pos2| (((p.x - sx0) / (sx1 - sx0)).clamp(0.0, 1.0) * total).max(0.0);
@@ -5512,7 +5593,7 @@ index 96240d4..9d4d705 100644
  
      // Sleeve: the mark when nothing is playing; a click goes up into the player.
      match &track {
-@@ -1194,7 +1228,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
+@@ -1194,7 +1254,7 @@ pub fn player_bar(app: &mut App, ui: &mut Ui, now: f64, frosted: bool) {
      // the times, which take the same row so nothing overlaps.
      let (title, _) = match &track {
          Some(t) => (t.title.clone(), ()),
@@ -5521,7 +5602,7 @@ index 96240d4..9d4d705 100644
      };
      let fade = 1.0 - 0.7 * focus;
      let afade = 1.0 - focus;
-@@ -1346,10 +1380,10 @@ fn paint_mark(ui: &Ui, r: Rect) {
+@@ -1346,10 +1406,10 @@ fn paint_mark(ui: &Ui, r: Rect) {
  }
  
  /// The BitChord mark, fitted inside `r`, tinted `tint`.
@@ -5534,7 +5615,7 @@ index 96240d4..9d4d705 100644
      let key = egui::Id::unique("bitchord-mark");
      let tex = match ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(key)) {
          Some(t) => t,
-@@ -1499,7 +1533,7 @@ pub fn queue_list(app: &mut App, ui: &mut Ui, salt: &str, close: bool) {
+@@ -1499,7 +1559,7 @@ pub fn queue_list(app: &mut App, ui: &mut Ui, salt: &str, close: bool) {
      let seed = app.queue_seed.as_deref() != Some(seed_key.as_str());
      let h = QUEUE_ROW_H + ui.spacing().item_spacing.y;
      let want = cur as f32 * h;
