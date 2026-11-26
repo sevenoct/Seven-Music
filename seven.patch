@@ -2433,7 +2433,8 @@ index bc4220d..6b2305f 100644
 -    let builder = builder.with_title("BitChord");
 +    let builder = builder.with_title("Seven");
      #[cfg(not(target_os = "linux"))]
-     let builder = builder.with_tooltip("YT Music");
+-    let builder = builder.with_tooltip("YT Music");
++    let builder = builder.with_tooltip("Seven");
      Ok((builder.build()?, toggle))
 diff --git a/src/ui/actions.rs b/src/ui/actions.rs
 index f869295..5ab1659 100644
@@ -4033,7 +4034,7 @@ index 252e6b9..dac8a97 100644
  }
  
  fn removal_items(c: &crate::backend::Collection, rows: impl IntoIterator<Item = usize>) -> Vec<(String, String)> {
-@@ -942,7 +953,52 @@ pub struct App {
+@@ -942,7 +953,54 @@ pub struct App {
      /// Light or dark pages (the ytm-rs theme's; see `light_pages`).
      appearance: theme::Appearance,
      anim_bg: bool,
@@ -4056,6 +4057,8 @@ index 252e6b9..dac8a97 100644
 +    np_gradient: bool,
 +    /// The Home carousel keeps its blurred-artwork ground; off, it wears the player's gradient.
 +    hero_blur: bool,
++    /// First launch ever (nothing saved yet): the defaults only a new install gets are set once.
++    fresh: bool,
 +    /// Watches the connection (started on the first frame) and holds the offline notice's state.
 +    net: Option<offline::Net>,
 +    /// Two-finger swipe on a touchpad goes back / forward, as in a browser.
@@ -4086,7 +4089,7 @@ index 252e6b9..dac8a97 100644
      reactive_bg: bool,
      /// Power saver: the shader blurs behind pages and the player stand down for a flat
      /// ambient tint, which costs an integrated GPU almost nothing.
-@@ -1387,13 +1443,38 @@ impl App {
+@@ -1387,13 +1445,39 @@ impl App {
              disable_direct_stream,
              background_art: None,
              art_changed: -10.0,
@@ -4105,10 +4108,11 @@ index 252e6b9..dac8a97 100644
              page_blobs: get("page_blobs").is_some_and(|v| v == "1"),
 +            home_tint: get("home_tint").is_some_and(|v| v == "1"),
 +            old_player: get("old_player").is_some_and(|v| v == "1"),
-+            np_gradient: get("np_gradient").is_some_and(|v| v == "1"),
++            np_gradient: get("np_gradient").is_none_or(|v| v == "1"),
 +            hero_blur: get("hero_blur").is_some_and(|v| v == "1"),
++            fresh: get("anim_bg").is_none(),
 +            net: None,
-+            swipe_nav: get("swipe_nav").is_none_or(|v| v == "1"),
++            swipe_nav: get("swipe_nav").is_some_and(|v| v == "1"),
 +            swipe_invert: get("swipe_invert").is_some_and(|v| v == "1"),
 +            swipe_skip: get("swipe_skip").is_none_or(|v| v == "1"),
 +            marquee: get("marquee").is_none_or(|v| v == "1"),
@@ -4124,9 +4128,10 @@ index 252e6b9..dac8a97 100644
 +            swipe_fire: None,
 +            about_jump: 0.0,
              reactive_bg: get("reactive_bg").is_none_or(|v| v == "1"),
-             disable_blur: get("disable_blur").is_some_and(|v| v == "1"),
+-            disable_blur: get("disable_blur").is_some_and(|v| v == "1"),
++            disable_blur: get("disable_blur").is_none_or(|v| v == "1"),
              animated_artwork: get("animated_artwork").is_some_and(|v| v == "1"),
-@@ -1600,6 +1681,213 @@ impl App {
+@@ -1600,6 +1684,213 @@ impl App {
          }
      }
  
@@ -4340,7 +4345,7 @@ index 252e6b9..dac8a97 100644
      fn nav_forward(&mut self) {
          if let Some(p) = self.forward.pop() {
              self.apple.clear();
-@@ -1817,7 +2105,7 @@ impl App {
+@@ -1817,7 +2108,7 @@ impl App {
          // With the icon tint off, a preset that borrows the cover's colour keeps the app's
          // own red instead; a preset that names its own colour is untouched by the switch.
          let untinted = !self.icon_tint && self.look().accent == "cover";
@@ -4349,7 +4354,7 @@ index 252e6b9..dac8a97 100644
          if theme::light() {
              // A pale cover colour would barely show on light pages: deepen it.
              let luma = 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
-@@ -1830,8 +2118,9 @@ impl App {
+@@ -1830,8 +2121,9 @@ impl App {
  
      /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
      /// Settings › Appearance › Mode.
@@ -4361,16 +4366,21 @@ index 252e6b9..dac8a97 100644
      }
  
      /// The active theme preset. Synced once per frame (`sync_look`), so this is a plain
-@@ -1911,6 +2200,8 @@ impl App {
+@@ -1911,6 +2203,13 @@ impl App {
      }
  
      pub(crate) fn run_logic(&mut self, ctx: &egui::Context, now: f64, has_window: bool) {
 +        self.sleep_tick(now);
 +        self.player_f_key(ctx);
++        if self.fresh {
++            // A new install's defaults that the saved-settings reader does not cover.
++            self.fresh = false;
++            self.icon_tint = true;
++        }
          let links = crate::deeplink::take();
          let reveal = crate::deeplink::take_show() || !links.is_empty();
          self.tray_window(ctx, reveal);
-@@ -1929,6 +2220,16 @@ impl App {
+@@ -1929,6 +2228,16 @@ impl App {
              m.set_playing(playing);
          }
          self.request_lyric_extras();
@@ -4387,7 +4397,7 @@ index 252e6b9..dac8a97 100644
          // Upload: files from the picker, or dropped onto the window.
          let mut files = self.picked_uploads.lock().unwrap().take().unwrap_or_default();
          files.extend(ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_owned()).filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>()));
-@@ -1989,6 +2290,7 @@ impl App {
+@@ -1989,6 +2298,7 @@ impl App {
          }
          if has_window {
              fit_window_to_monitor(ctx);
@@ -4395,7 +4405,7 @@ index 252e6b9..dac8a97 100644
          }
          // Dev hook: YTM_MINI=<secs>[,<secs>…] switches between the mini player and the
          // full window at those times (YTM_MINI=1: the mini player after a second).
-@@ -2040,12 +2342,18 @@ impl App {
+@@ -2040,12 +2350,18 @@ impl App {
                  ctx.request_repaint_after(Duration::from_millis(250));
              }
          } else if self.np_open && playing && !self.mini.busy() {
@@ -4416,7 +4426,7 @@ index 252e6b9..dac8a97 100644
          } else if playing || self.buffering {
              ctx.request_repaint_after(Duration::from_millis(250));
          }
-@@ -2106,7 +2414,6 @@ impl eframe::App for App {
+@@ -2106,7 +2422,6 @@ impl eframe::App for App {
          // The full-screen player always keeps the sung lines: its sheet is the whole
          // picture, and the setting only trims the panels.
          ctx.data_mut(|d| d.insert_temp(egui::Id::unique("lyrics-past"), self.show_past_lines || self.fullscreen));
@@ -4424,7 +4434,7 @@ index 252e6b9..dac8a97 100644
          // Once now playing has slid all the way up it hides everything but the player
          // bar, so the pages and the full-screen background under it aren't drawn.
          let covered = !self.fullscreen && np >= 1.0;
-@@ -2143,29 +2450,8 @@ impl eframe::App for App {
+@@ -2143,29 +2458,8 @@ impl eframe::App for App {
                  .show(ui, |ui| shell::player_bar(self, ui, now, false));
          }
          if !self.fullscreen && !covered {
@@ -4456,7 +4466,7 @@ index 252e6b9..dac8a97 100644
              let section = ui.available_rect_before_wrap();
              let q = theme::anim_bool(&ctx, "queue-drawer", self.queue_open && !self.np_open, 0.25);
              if q > 0.01 {
-@@ -2188,11 +2474,13 @@ impl eframe::App for App {
+@@ -2188,11 +2482,13 @@ impl eframe::App for App {
              let main_right = ui.available_rect_before_wrap().right();
              egui::CentralPanel::default()
                  .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -4472,7 +4482,7 @@ index 252e6b9..dac8a97 100644
                      bottom: 0,
                  }))
                  .show(ui, |ui| {
-@@ -2211,6 +2499,8 @@ impl eframe::App for App {
+@@ -2211,6 +2507,8 @@ impl eframe::App for App {
                          shell::player_bar(self, ui, now, true);
                      });
                  });
@@ -4481,7 +4491,7 @@ index 252e6b9..dac8a97 100644
          }
          if np > 0.001 {
              let pages = theme::set_mode(&ctx, false);
-@@ -2226,12 +2516,23 @@ impl eframe::App for App {
+@@ -2226,12 +2524,23 @@ impl eframe::App for App {
 +        // No connection: a notice with a way to the music kept on this device.
 +        offline::show(self, &ctx, now);
          shell::toast(self, &ctx, now);
@@ -4506,7 +4516,7 @@ index 252e6b9..dac8a97 100644
  
          if dev_var("YTM_THEME_TOUR").is_some() {
              self.theme_tour(&ctx, now);
-@@ -2392,7 +2693,21 @@ impl eframe::App for App {
+@@ -2392,7 +2701,21 @@ impl eframe::App for App {
              storage.set_string("font", theme::font_choice());
          }
          storage.set_string("anim_bg", b(self.anim_bg));
@@ -4528,7 +4538,7 @@ index 252e6b9..dac8a97 100644
          storage.set_string("reactive_bg", b(self.reactive_bg));
          storage.set_string("disable_blur", b(self.disable_blur));
          storage.set_string("animated_artwork", b(self.animated_artwork));
-@@ -2543,6 +2858,43 @@ struct PlayingAs {
+@@ -2543,6 +2866,43 @@ struct PlayingAs {
  }
  
  
