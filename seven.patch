@@ -1805,19 +1805,23 @@ index ccdcf0bed67fd29546f584773041d2e9062b70b2..0f339604e7b7b3104c8165aeeba0076b
     "olafix52"
    ],
 diff --git a/build.rs b/build.rs
-index a880f7648288277fb167d09a6fb36f434c44faad..2ae032692e15abecb2e3042cee4fc0a4a867701f 100644
+index a880f7648288277fb167d09a6fb36f434c44faad..e8f41357bf9baf9744bdc9a8a46438b3bf76ccfd 100644
 --- a/build.rs
 +++ b/build.rs
-@@ -5,6 +5,8 @@ fn main() {
+@@ -5,6 +5,12 @@ fn main() {
      if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
          winresource::WindowsResource::new()
              .set_icon("assets/icon/icon.ico")
 +            .set("ProductName", "Seven")
 +            .set("FileDescription", "Seven")
++            .set("InternalName", "Seven")
++            .set("OriginalFilename", "Seven.exe")
++            .set("CompanyName", "Seven")
++            .set("LegalCopyright", "GPL-3.0-only")
              .set_manifest(MANIFEST)
              .compile()
              .expect("failed to embed Windows icon");
-@@ -13,11 +15,18 @@ fn main() {
+@@ -13,11 +19,18 @@ fn main() {
  
  // The segment heap returns freed memory to the OS far more readily than the default
  // NT heap, which keeps the resident footprint down after bursts (images, JSON).
@@ -1920,7 +1924,7 @@ index 0b679389eb15f62e02ecd1dc6755d30a2135fea4..1acfb2dd6ba0cd18be4554d07f60ea2b
              let showing = if current.as_os_str().is_empty() { exe.to_owned() } else { current };
              if same_file(&showing, icon) && index == 0 {
 diff --git a/src/backend.rs b/src/backend.rs
-index d672c5905387d4a3f55f20dcd8ad72cd8dff8038..33da5b2643f58989b156d221d8d597600ea0a23c 100644
+index d672c5905387d4a3f55f20dcd8ad72cd8dff8038..f65ddbbd916d3791bb38763aa83243c46711e52f 100644
 --- a/src/backend.rs
 +++ b/src/backend.rs
 @@ -1205,7 +1205,7 @@ impl Backend {
@@ -1928,7 +1932,7 @@ index d672c5905387d4a3f55f20dcd8ad72cd8dff8038..33da5b2643f58989b156d221d8d59760
          let official = hits.iter().find(|t| t.music_video && ours(t)).cloned();
          let found = named.or(official).or_else(|| hits.into_iter().find(|t| ours(t)));
 -        found.ok_or_else(|| anyhow::anyhow!("YouTube Music has no copy of {title}"))
-+        found.ok_or_else(|| anyhow::anyhow!("Seven has no copy of {title}"))
++        found.ok_or_else(|| anyhow::anyhow!("No copy of {title} was found"))
      }
  
      /// The clip YouTube Music holds for a song that is not itself a video: the video
@@ -1937,7 +1941,7 @@ index d672c5905387d4a3f55f20dcd8ad72cd8dff8038..33da5b2643f58989b156d221d8d59760
                  hits.into_iter()
                      .find(|t| t.music_video && t.title.to_lowercase().contains(&want) && ours(t))
 -                    .ok_or_else(|| anyhow::anyhow!("YouTube Music has no music video of {}", track.title))
-+                    .ok_or_else(|| anyhow::anyhow!("Seven has no music video of {}", track.title))
++                    .ok_or_else(|| anyhow::anyhow!("No music video of {} was found", track.title))
              }
          }
      }
@@ -1946,7 +1950,7 @@ index d672c5905387d4a3f55f20dcd8ad72cd8dff8038..33da5b2643f58989b156d221d8d59760
          let named = hits.iter().find(|t| same_name(&t.title, title) && near_artist(artist, &t.artist_line())).cloned();
          let titled = named.or_else(|| hits.iter().find(|t| same_name(&t.title, title)).cloned());
 -        titled.or_else(|| hits.first().cloned()).ok_or_else(|| anyhow::anyhow!("YouTube Music has no copy of {title}"))
-+        titled.or_else(|| hits.first().cloned()).ok_or_else(|| anyhow::anyhow!("Seven has no copy of {title}"))
++        titled.or_else(|| hits.first().cloned()).ok_or_else(|| anyhow::anyhow!("No copy of {title} was found"))
      }
  
      /// YouTube Music's id for a release Apple names. Apple's playlists are curated under
@@ -1955,7 +1959,7 @@ index d672c5905387d4a3f55f20dcd8ad72cd8dff8038..33da5b2643f58989b156d221d8d59760
          let named = hits.iter().find(|c| same_name(&c.title, title) && (playlist || near_artist(artist, &c.subtitle))).and_then(pick);
          let titled = named.or_else(|| hits.iter().find(|c| same_name(&c.title, title)).and_then(pick));
 -        titled.or_else(|| hits.first().and_then(pick)).ok_or_else(|| anyhow::anyhow!("YouTube Music has no copy of {title}"))
-+        titled.or_else(|| hits.first().and_then(pick)).ok_or_else(|| anyhow::anyhow!("Seven has no copy of {title}"))
++        titled.or_else(|| hits.first().and_then(pick)).ok_or_else(|| anyhow::anyhow!("No copy of {title} was found"))
      }
  
      /// Saved playlists and albums.
@@ -1986,7 +1990,7 @@ index ed287e440cc220b0a60b79b9084712fa9709a89a..49dc728970284e11bdf02f5b34d12210
                      }
                      std::thread::sleep(Duration::from_millis(25));
 diff --git a/src/discord.rs b/src/discord.rs
-index a7420906b8fc4853f14734234645d247252099a3..fef3714a6a61e470af9c143ff503db2316983d5d 100644
+index a7420906b8fc4853f14734234645d247252099a3..41b0ca75dce0d0420d33ae49bc317236d1fd95b0 100644
 --- a/src/discord.rs
 +++ b/src/discord.rs
 @@ -19,7 +19,7 @@ const RETRY: Duration = Duration::from_secs(15);
@@ -1998,21 +2002,43 @@ index a7420906b8fc4853f14734234645d247252099a3..fef3714a6a61e470af9c143ff503db23
  
  #[derive(Clone, Debug, PartialEq)]
  pub struct Presence {
-@@ -136,9 +136,9 @@ impl Prefs {
+@@ -136,11 +136,9 @@ impl Prefs {
      }
  }
  
 -const DEFAULT_BUTTON1: &str = "Listen on YouTube Music";
 -const DEFAULT_BUTTON2: &str = "Visit BitChord PC Continued";
 -const PROJECT_URL: &str = "https://github.com/jackychan4891/BitChord-PC-Continued";
+-/// The cover when a song has no artwork URL: the card always has one, as the old app's did.
+-const FALLBACK_ART: &str = "https://raw.githubusercontent.com/kushagrasinghx/BitChord/main/app/src/main/ic_launcher-playstore.png";
 +const DEFAULT_BUTTON1: &str = "Listen on Seven";
 +const DEFAULT_BUTTON2: &str = "Visit Seven";
 +const PROJECT_URL: &str = "https://sevenboy.my.id";
- /// The cover when a song has no artwork URL: the card always has one, as the old app's did.
- const FALLBACK_ART: &str = "https://raw.githubusercontent.com/kushagrasinghx/BitChord/main/app/src/main/ic_launcher-playstore.png";
  
+ /// What the worker is told: a new presence, or new wording for the card.
+ enum Msg {
+@@ -255,11 +253,14 @@ fn activity<'a>(p: &'a Presence, prefs: &Prefs) -> Activity<'a> {
+         (true, Some(quality)) => Some(quality.to_owned()),
+         _ => p.album.clone(),
+     };
+-    // The card always carries a cover, so a song with no artwork URL still reads whole.
+-    let art = p.art.as_deref().filter(|u| u.len() <= 256).unwrap_or(FALLBACK_ART);
+-    let mut assets = Assets::new().large_image(art);
+-    if let Some(line) = &art_line {
+-        assets = assets.large_text(field(line));
++    // A song with no artwork URL gets no cover: Discord then shows the application's own icon.
++    let art = p.art.as_deref().filter(|u| u.len() <= 256);
++    let mut assets = Assets::new();
++    if let Some(art) = art {
++        assets = assets.large_image(art);
++        if let Some(line) = &art_line {
++            assets = assets.large_text(field(line));
++        }
+     }
+     // The card reads the way the player does: the app's name above it, the song as the
+     // bold line, the artist under that, the quality or album on the cover. `name` is the
 diff --git a/src/downloads.rs b/src/downloads.rs
-index d289c6d8528761748c0b5f79df9ecfd9bae2460e..16fcb6cff1eaf0cb92d2d5c4e6299ca7b984ecc3 100644
+index d289c6d8528761748c0b5f79df9ecfd9bae2460e..8d153a9187013f262b32a9e797bcf10845f12c1d 100644
 --- a/src/downloads.rs
 +++ b/src/downloads.rs
 @@ -27,6 +27,10 @@ struct Entry {
@@ -2026,22 +2052,86 @@ index d289c6d8528761748c0b5f79df9ecfd9bae2460e..16fcb6cff1eaf0cb92d2d5c4e6299ca7
  }
  
  struct State {
-@@ -39,12 +43,12 @@ struct State {
+@@ -39,23 +43,72 @@ struct State {
  static STATE: LazyLock<RwLock<State>> =
      LazyLock::new(|| RwLock::new(State { index: HashMap::new(), file: PathBuf::new(), folder: default_folder() }));
  
 -/// Music\BitChord.
 +/// Music\Seven Music.
  pub fn default_folder() -> PathBuf {
-     let base = directories::UserDirs::new()
+-    let base = directories::UserDirs::new()
++    music_dir().join("Seven Music")
++}
++
++fn music_dir() -> PathBuf {
++    directories::UserDirs::new()
          .and_then(|u| u.audio_dir().map(Path::to_path_buf).or_else(|| Some(u.home_dir().join("Music"))))
-         .unwrap_or_else(|| PathBuf::from("."));
+-        .unwrap_or_else(|| PathBuf::from("."));
 -    base.join("BitChord")
-+    base.join("Seven Music")
++        .unwrap_or_else(|| PathBuf::from("."))
++}
++
++/// The folder the app used before it was renamed: Music\BitChord.
++fn old_default_folder() -> PathBuf {
++    music_dir().join("BitChord")
++}
++
++/// Carry songs from the old default folder into the new one, once: files are moved (never
++/// overwritten), and the index follows them so nothing stops counting as downloaded.
++fn migrate_old_folder(index: &mut HashMap<String, Entry>) -> bool {
++    let (old, new) = (old_default_folder(), default_folder());
++    if !old.is_dir() || old == new {
++        return false;
++    }
++    if std::fs::create_dir_all(&new).is_err() {
++        return false;
++    }
++    let Ok(entries) = std::fs::read_dir(&old) else { return false };
++    for e in entries.flatten() {
++        let from = e.path();
++        let Some(name) = from.file_name() else { continue };
++        let to = new.join(name);
++        if from.is_file() && !to.exists() {
++            let _ = std::fs::rename(&from, &to);
++        }
++    }
++    // Only goes if nothing is left in it.
++    let _ = std::fs::remove_dir(&old);
++    let mut changed = false;
++    for entry in index.values_mut() {
++        if let Ok(rest) = entry.path.strip_prefix(&old) {
++            let moved = new.join(rest);
++            if moved.is_file() {
++                entry.path = moved;
++                changed = true;
++            }
++        }
++    }
++    changed
  }
  
  /// Load the index; `folder` is the saved setting (empty for the default).
-@@ -129,7 +133,7 @@ pub fn list() -> Vec<Track> {
+ pub fn init(data_dir: &Path, folder: &str) {
+     let file = data_dir.join("downloads.json");
+-    let index = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
++    let mut index: HashMap<String, Entry> = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
++    // The default folder used to be Music\BitChord (also when it was saved as the setting).
++    let uses_default = folder.is_empty() || Path::new(folder) == old_default_folder();
++    if uses_default && migrate_old_folder(&mut index) {
++        if let Ok(json) = serde_json::to_vec(&index) {
++            let _ = std::fs::write(&file, json);
++        }
++    }
+     {
+         let mut st = STATE.write().unwrap();
+         st.index = index;
+         st.file = file;
+-        st.folder = if folder.is_empty() { default_folder() } else { PathBuf::from(folder) };
++        st.folder = if uses_default { default_folder() } else { PathBuf::from(folder) };
+     }
+     sync_local_files();
+ }
+@@ -129,7 +182,7 @@ pub fn list() -> Vec<Track> {
      let mut out: Vec<(std::time::SystemTime, Track)> = st
          .index
          .values()
@@ -2050,7 +2140,7 @@ index d289c6d8528761748c0b5f79df9ecfd9bae2460e..16fcb6cff1eaf0cb92d2d5c4e6299ca7
          .filter_map(|e| {
              let modified = std::fs::metadata(&e.path).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
              e.song.clone().map(|t| (modified, t))
-@@ -238,6 +242,7 @@ pub fn sync_local_files() {
+@@ -238,6 +291,7 @@ pub fn sync_local_files() {
              loudness_db: None,
              stands_for: None,
              song: Some(track),
@@ -2058,7 +2148,7 @@ index d289c6d8528761748c0b5f79df9ecfd9bae2460e..16fcb6cff1eaf0cb92d2d5c4e6299ca7
          });
          updated = true;
      }
-@@ -281,7 +286,7 @@ pub fn save(t: &Track, audio: &[u8], duration_ms: u64, loudness_db: Option<f32>,
+@@ -281,7 +335,7 @@ pub fn save(t: &Track, audio: &[u8], duration_ms: u64, loudness_db: Option<f32>,
      let mut st = STATE.write().unwrap();
      // Every entry keeps its song, so the Downloads page can list it later.
      let song = Some(t.clone());
@@ -2067,7 +2157,7 @@ index d289c6d8528761748c0b5f79df9ecfd9bae2460e..16fcb6cff1eaf0cb92d2d5c4e6299ca7
      if let Ok(json) = serde_json::to_vec(&st.index) {
          let _ = std::fs::write(&st.file, json);
      }
-@@ -298,7 +303,7 @@ fn sniff(audio: &[u8]) -> (&'static str, Format) {
+@@ -298,7 +352,7 @@ fn sniff(audio: &[u8]) -> (&'static str, Format) {
          (_, Some(b"fLaC")) => file("flac", "flac", "audio/flac"),
          (_, Some(b"OggS")) => file("ogg", "ogg", "audio/ogg"),
          (_, Some(b"RIFF")) => file("wav", "wav", "audio/wav"),
@@ -2076,7 +2166,7 @@ index d289c6d8528761748c0b5f79df9ecfd9bae2460e..16fcb6cff1eaf0cb92d2d5c4e6299ca7
          // An MP3 with no tag starts at its frame sync: 11 set bits.
          _ if matches!(audio.get(..2), Some(&[0xFF, 0xE0..=0xFF])) => file("mp3", "mp3", "audio/mpeg"),
          _ => ("webm", Format::Opus),
-@@ -390,3 +395,206 @@ mod tests {
+@@ -390,3 +444,206 @@ mod tests {
          assert_eq!(sniff(&head(*b"OggS")).0, "ogg");
      }
  }
@@ -2297,7 +2387,7 @@ index 00222bcbc4da09d4bdf5914a85c54df88631e2b4..2787b9c7c88204918c7a34e9c4aaa797
                  anyhow::bail!("the addon refused the request (sign-in required)");
              }
 diff --git a/src/login.rs b/src/login.rs
-index c100c607ec88f228e829b8ea891080f025872ecd..b7c1da3d3c3dfafeeb6c6b8a49edbaea9e96dc06 100644
+index c100c607ec88f228e829b8ea891080f025872ecd..b75dc27ccdafb3637ece1b30e39cc2806d3228e5 100644
 --- a/src/login.rs
 +++ b/src/login.rs
 @@ -35,7 +35,7 @@ impl Site {
@@ -2305,7 +2395,7 @@ index c100c607ec88f228e829b8ea891080f025872ecd..b7c1da3d3c3dfafeeb6c6b8a49edbaea
      fn title(self) -> &'static str {
          match self {
 -            Site::Google => "Sign in to YouTube Music",
-+            Site::Google => "Sign in to Seven",
++            Site::Google => "Sign in",
              Site::Spotify => "Sign in to Spotify",
          }
      }
@@ -2360,7 +2450,7 @@ index b8f7c53f0b481e64cda229e7a9a4ba82dae4f505..062ef68c814b1a11f65ad3535ddf6fe9
              accent: "cover".into(),
              ..Default::default()
 diff --git a/src/proxy.rs b/src/proxy.rs
-index 93d397a75b51b6a3e83bcdad6984829b1e18c370..555de3ea07552cceee52b426c3358ca92e72d701 100644
+index 93d397a75b51b6a3e83bcdad6984829b1e18c370..93427e6c600b3e1892755717260c9b8241878c4b 100644
 --- a/src/proxy.rs
 +++ b/src/proxy.rs
 @@ -371,7 +371,7 @@ async fn socks5(s: &mut TcpStream, p: &url::Url, host: &str, port: u16) -> anyho
@@ -2368,7 +2458,7 @@ index 93d397a75b51b6a3e83bcdad6984829b1e18c370..555de3ea07552cceee52b426c3358ca9
              anyhow::ensure!(reply[1] == 0, "the SOCKS proxy rejected the username or password");
          }
 -        _ => anyhow::bail!("the SOCKS proxy wants a sign-in BitChord doesn't support"),
-+        _ => anyhow::bail!("the SOCKS proxy wants a sign-in Seven doesn't support"),
++        _ => anyhow::bail!("the SOCKS proxy wants a sign-in this app doesn't support"),
      }
      let mut req = vec![5, 1, 0, 3, host.len() as u8];
      req.extend(host.as_bytes());
@@ -2378,8 +2468,8 @@ index 93d397a75b51b6a3e83bcdad6984829b1e18c370..555de3ea07552cceee52b426c3358ca9
          let tor = s.resolve().is_some_and(|p| p.scheme().starts_with("socks") && p.username().is_empty());
 -        anyhow::ensure!(tor, "it connects, but YouTube Music isn't available where this proxy comes out. Try a server in another country.");
 -        log::info!("proxy test: this exit isn't offered YouTube Music; the app switches exits by itself");
-+        anyhow::ensure!(tor, "it connects, but Seven isn't available where this proxy comes out. Try a server in another country.");
-+        log::info!("proxy test: this exit isn't offered Seven; the app switches exits by itself");
++        anyhow::ensure!(tor, "it connects, but the service isn't available where this proxy comes out. Try a server in another country.");
++        log::info!("proxy test: this exit isn't offered the service; the app switches exits by itself");
      }
      Ok(took)
  }
@@ -2459,7 +2549,7 @@ index 499f22240f1bad29448361a3eb61fab7d2fdbe6e..c97541a43e802df5b3b025f200f03773
      for (w, fill) in [
          (&mut v.widgets.inactive, glass(0.08)),
 diff --git a/src/transfer/mod.rs b/src/transfer/mod.rs
-index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93ff331617 100644
+index 498017672693066fc22111ee638a61b726d53d49..db2ec58fed9c882dbe83e6bef44b139701d0325b 100644
 --- a/src/transfer/mod.rs
 +++ b/src/transfer/mod.rs
 @@ -677,7 +677,7 @@ impl Transfer {
@@ -2467,7 +2557,7 @@ index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93
              // The rest would go to another account or channel than the part done.
              if self.pinned.lock().unwrap().as_ref().is_some_and(|(api, epoch)| api.epoch() != *epoch) {
 -                bail!("Stopped: the YouTube Music account or channel changed");
-+                bail!("Stopped: the Seven account or channel changed");
++                bail!("Stopped: the account or channel changed");
              }
              if !self.with_job(|j| j.paused) {
                  return Ok(());
@@ -2476,7 +2566,7 @@ index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93
  
      async fn run(&self, api: &Api) -> Result<()> {
 -        anyhow::ensure!(api.account().is_some(), "Sign in to YouTube Music first");
-+        anyhow::ensure!(api.account().is_some(), "Sign in to Seven first");
++        anyhow::ensure!(api.account().is_some(), "Sign in first");
          let source = self.with_job(|j| j.source.clone());
  
          // ---- read the Spotify side, or pick up saved progress (for the same destination)
@@ -2485,7 +2575,7 @@ index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93
          }
          let pending = self.with_job(|j| j.count(|r| *r == Search::Pending));
 -        anyhow::ensure!(pending == 0, "{pending} songs couldn't be searched (no connection, or YouTube Music is limiting requests)");
-+        anyhow::ensure!(pending == 0, "{pending} songs couldn't be searched (no connection, or Seven is limiting requests)");
++        anyhow::ensure!(pending == 0, "{pending} songs couldn't be searched (no connection, or The service is limiting requests)");
  
          // ---- search the doubtful songs again, with videos, for the review
          let doubtful: Vec<usize> = self.with_job(|j| {
@@ -2494,7 +2584,7 @@ index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93
              (ids, j.results.iter().filter(|r| r.track().is_some()).count(), j.dest.clone())
          });
 -        anyhow::ensure!(!ids.is_empty(), "None of the songs were found on YouTube Music");
-+        anyhow::ensure!(!ids.is_empty(), "None of the songs were found on Seven");
++        anyhow::ensure!(!ids.is_empty(), "None of the songs were found");
          let duplicates = picked - ids.len();
          // Dev hook: YTM_TRANSFER_DRY=1 does everything but add the songs.
          let dry = std::env::var_os("YTM_TRANSFER_DRY").is_some();
@@ -2503,7 +2593,7 @@ index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93
                  Ok(Some((t, false))) => Search::Unsure(t),
                  Ok(None) => Search::Missing,
 -                Err(e) if signed_out(&e) => return Err(e.context("YouTube Music signed you out; sign in again and try again")),
-+                Err(e) if signed_out(&e) => return Err(e.context("Seven signed you out; sign in again and try again")),
++                Err(e) if signed_out(&e) => return Err(e.context("You were signed out; sign in and try again")),
                  Err(e) => {
                      log::debug!("transfer search: {e:#}");
                      failed += 1;
@@ -2512,7 +2602,7 @@ index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93
                  hung += 1;
                  if hung == 10 {
 -                    bail!("Liking songs failed: YouTube Music stopped answering");
-+                    bail!("Liking songs failed: Seven stopped answering");
++                    bail!("Liking songs failed: the service stopped answering");
                  }
                  continue;
              };
@@ -2520,7 +2610,7 @@ index 498017672693066fc22111ee638a61b726d53d49..e5a914032806701c534c40b5a2d0ec93
              match sent {
                  Ok(()) => break,
 -                Err(e) if signed_out(&e) => return Err(e.context("YouTube Music signed you out; sign in again and try again")),
-+                Err(e) if signed_out(&e) => return Err(e.context("Seven signed you out; sign in again and try again")),
++                Err(e) if signed_out(&e) => return Err(e.context("You were signed out; sign in and try again")),
                  Err(e) if tries < 4 => {
                      log::debug!("like {id}: {e:#}");
                      tokio::time::sleep(Duration::from_millis(800 * tries)).await;
@@ -2728,7 +2818,7 @@ index 27d93cdddc63ba249c7d3f4e7a0f1be80c52f8c1..6ce30389782b447f82a6816858adb7af
          } else {
              self.toast(if ok.len() == 1 { "Uploading 1 song…".to_owned() } else { format!("Uploading {} songs…", ok.len()) });
 diff --git a/src/ui/actions.rs b/src/ui/actions.rs
-index f869295600baee93c52fd96258f7b6c2dbff330d..3b5dd1b67be12dba2e0876009eff4f1b4e3f1556 100644
+index f869295600baee93c52fd96258f7b6c2dbff330d..380c3bdaecafdce53904fd90dde5b97d4a09e847 100644
 --- a/src/ui/actions.rs
 +++ b/src/ui/actions.rs
 @@ -83,14 +83,14 @@ impl App {
@@ -2736,7 +2826,7 @@ index f869295600baee93c52fd96258f7b6c2dbff330d..3b5dd1b67be12dba2e0876009eff4f1b
                      let Target::Apple { url, .. } = &t else { return };
                      if url.is_empty() {
 -                        self.toast("Finding that on YouTube Music…");
-+                        self.toast("Finding that on Seven…");
++                        self.toast("Finding that song…");
                          self.backend.request(Req::AppleLookup(t));
                          return;
                      }
@@ -2744,7 +2834,7 @@ index f869295600baee93c52fd96258f7b6c2dbff330d..3b5dd1b67be12dba2e0876009eff4f1b
                  }
                  crate::model::AppleKind::Song | crate::model::AppleKind::Video => {
 -                    self.toast("Finding that on YouTube Music…");
-+                    self.toast("Finding that on Seven…");
++                    self.toast("Finding that song…");
                      self.play_pending = Some((t.clone(), false));
                      self.backend.request(Req::PlayCollection { target: t });
                  }
@@ -2753,7 +2843,7 @@ index f869295600baee93c52fd96258f7b6c2dbff330d..3b5dd1b67be12dba2e0876009eff4f1b
                      return;
                  }
 -                self.toast("Finding those on YouTube Music…");
-+                self.toast("Finding those on Seven…");
++                self.toast("Finding those songs…");
                  self.play_pending = Some((target.clone(), shuffle));
                  self.backend.request(Req::AppleSongs { target, songs });
              }
@@ -2788,12 +2878,12 @@ index f869295600baee93c52fd96258f7b6c2dbff330d..3b5dd1b67be12dba2e0876009eff4f1b
              Action::RemoveFromPlaylist { playlist, items } => {
                  if items.is_empty() {
 -                    self.toast("YouTube Music didn't say where these songs are in the playlist. Reload it and try again.");
-+                    self.toast("Seven didn't say where these songs are in the playlist. Reload it and try again.");
++                    self.toast("The service didn't say where these songs are in the playlist. Reload it and try again.");
                      return;
                  }
                  let Some(c) = self.current_collection().filter(|c| c.id == playlist && c.owned && !c.is_album) else { return };
 diff --git a/src/ui/dialogs.rs b/src/ui/dialogs.rs
-index 420d5601bebd6d935bbfd039318b125f5528a570..1f42f69d8e9a22626c812ee041c4d297e6cbc4c2 100644
+index 420d5601bebd6d935bbfd039318b125f5528a570..610a67ff61757cbe374c4141ac3a0f61cb72113b 100644
 --- a/src/ui/dialogs.rs
 +++ b/src/ui/dialogs.rs
 @@ -57,7 +57,7 @@ impl App {
@@ -2828,16 +2918,16 @@ index 420d5601bebd6d935bbfd039318b125f5528a570..1f42f69d8e9a22626c812ee041c4d297
              ui.label(egui::RichText::new("Delete playlist?").font(theme::bold(22.0)).color(theme::text()));
              ui.add_space(10.0);
 -            let body = format!("\u{201c}{title}\u{201d} will be removed from your YouTube Music library. This can't be undone.");
-+            let body = format!("\u{201c}{title}\u{201d} will be removed from your Seven library. This can't be undone.");
++            let body = format!("\u{201c}{title}\u{201d} will be removed from your library. This can't be undone.");
              ui.add(egui::Label::new(egui::RichText::new(body).font(theme::regular(14.0)).color(theme::text_dim())).wrap());
              ui.add_space(22.0);
              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..8c4df829aa0862e716ddbcc7529e1a4e9705250a
+index 0000000000000000000000000000000000000000..52a1b717f12b0591771b98b86d31a25bf96b1873
 --- /dev/null
 +++ b/src/ui/fx.rs
-@@ -0,0 +1,501 @@
+@@ -0,0 +1,502 @@
 +//! Small effects borrowed from Mochy Music: the wavy seek line, the like burst, the press
 +//! bounce, the visualizer beside the player, the staggered entrance of cards and the
 +//! greeting on Home. Everything is drawn with the painter calls the rest of the app
@@ -3265,8 +3355,9 @@ index 0000000000000000000000000000000000000000..8c4df829aa0862e716ddbcc7529e1a4e
 +    } else {
 +        // Signed out and no photo: a plain head and shoulders on a dark disc.
 +        let (c, w) = (rect.center(), rect.width());
-+        ui.painter().circle_filled(c, r, Color32::from_white_alpha(22));
-+        let ink = Color32::from_white_alpha(170);
++        let light = theme::light();
++        ui.painter().circle_filled(c, r, if light { Color32::from_black_alpha(20) } else { Color32::from_white_alpha(22) });
++        let ink = if light { Color32::from_black_alpha(130) } else { Color32::from_white_alpha(170) };
 +        ui.painter().circle_filled(c + vec2(0.0, -0.11 * w), 0.16 * w, ink);
 +        let base = c + vec2(0.0, 0.42 * w);
 +        let shoulders: Vec<egui::Pos2> = (0..=16)
@@ -4059,7 +4150,7 @@ index 0000000000000000000000000000000000000000..fff616747ea09d8879a2c11c6c0a04b8
 +    }
 +}
 diff --git a/src/ui/jam.rs b/src/ui/jam.rs
-index 5fb5537bff294e324ab0b4952dc334ee589d29d1..70e415bd52962cab764ce2ecf378ffd4e0495b04 100644
+index 5fb5537bff294e324ab0b4952dc334ee589d29d1..6dc2203b6616b1e94354725c77c142844092cb36 100644
 --- a/src/ui/jam.rs
 +++ b/src/ui/jam.rs
 @@ -742,7 +742,7 @@ fn lobby(app: &mut App, ui: &mut Ui) {
@@ -4067,7 +4158,7 @@ index 5fb5537bff294e324ab0b4952dc334ee589d29d1..70e415bd52962cab764ce2ecf378ffd4
      if app.account_name.is_none() {
          ui.add_space(8.0);
 -        dim(ui, "A party uses your YouTube Music account for your name. Sign in above to bring it along.");
-+        dim(ui, "A party uses your Seven account for your name. Sign in above to bring it along.");
++        dim(ui, "A party uses your signed-in account for your name. Sign in above to bring it along.");
      }
      section_label(ui, "Start a party", None);
      settings_card(ui, |ui| {
@@ -4225,7 +4316,7 @@ index 249fb6f8d8c59be25669b34c0d853832ad2c92b1..b81defbf0c7f47f41091d1281ae4914f
              && (sresp.clicked() || sresp.dragged())
          {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422ddb293bf5a 100644
+index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e26a5a4412113a1dd6003ef090c0af39e9d9338b 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,10 @@ mod backdrop;
@@ -4323,7 +4414,18 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
      reactive_bg: bool,
      /// Power saver: the shader blurs behind pages and the player stand down for a flat
      /// ambient tint, which costs an integrated GPU almost nothing.
-@@ -1387,15 +1445,41 @@ impl App {
+@@ -1341,7 +1399,9 @@ impl App {
+             whats_new: {
+                 let current = crate::update::current_version();
+                 let last = get("last_version");
+-                (std::env::var_os("YTM_WHATS_NEW").is_some() || last.is_some_and(|v| crate::update::newer(&current, &v))).then_some(current)
++                // No "what's new" card: its notes would come from BitChord's releases.
++                let _ = (current, last);
++                None::<String>
+             },
+             restart_for_update: false,
+             proxy_saved: crate::proxy::active().clone(),
+@@ -1387,15 +1447,41 @@ impl App {
              disable_direct_stream,
              background_art: None,
              art_changed: -10.0,
@@ -4367,7 +4469,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
              animated_artwork: get("animated_artwork").is_some_and(|v| v == "1"),
              show_best_part: get("show_best_part").is_none_or(|v| v == "1"),
              show_volume: get("show_volume").is_none_or(|v| v == "1"),
-@@ -1600,6 +1684,213 @@ impl App {
+@@ -1600,6 +1686,213 @@ impl App {
          }
      }
  
@@ -4581,7 +4683,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
      fn nav_forward(&mut self) {
          if let Some(p) = self.forward.pop() {
              self.apple.clear();
-@@ -1817,7 +2108,7 @@ impl App {
+@@ -1817,7 +2110,7 @@ impl App {
          // With the icon tint off, a preset that borrows the cover's colour keeps the app's
          // own red instead; a preset that names its own colour is untouched by the switch.
          let untinted = !self.icon_tint && self.look().accent == "cover";
@@ -4590,19 +4692,18 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
          if theme::light() {
              // A pale cover colour would barely show on light pages: deepen it.
              let luma = 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
-@@ -1830,8 +2121,9 @@ impl App {
- 
-     /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
-     /// Settings › Appearance › Mode.
--    fn light_pages(&self, ctx: &egui::Context) -> bool {
--        self.look().id == crate::preset::DEFAULT_ID && self.appearance.is_light(ctx)
-+    /// Mochy renders dark only: its light palette was never finished.
-+    fn light_pages(&self, _ctx: &egui::Context) -> bool {
-+        false
+@@ -1828,8 +2121,8 @@ impl App {
+         c
      }
  
-     /// The active theme preset. Synced once per frame (`sync_look`), so this is a plain
-@@ -1911,6 +2203,13 @@ impl App {
+-    /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
+-    /// Settings › Appearance › Mode.
++    /// Whether pages draw light: only the default theme has a light mode, and it follows
++    /// Settings › Appearance › Mode. The floating rail and player pill stay dark glass.
+     fn light_pages(&self, ctx: &egui::Context) -> bool {
+         self.look().id == crate::preset::DEFAULT_ID && self.appearance.is_light(ctx)
+     }
+@@ -1911,6 +2204,13 @@ impl App {
      }
  
      pub(crate) fn run_logic(&mut self, ctx: &egui::Context, now: f64, has_window: bool) {
@@ -4616,7 +4717,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
          let links = crate::deeplink::take();
          let reveal = crate::deeplink::take_show() || !links.is_empty();
          self.tray_window(ctx, reveal);
-@@ -1929,6 +2228,16 @@ impl App {
+@@ -1929,6 +2229,16 @@ impl App {
              m.set_playing(playing);
          }
          self.request_lyric_extras();
@@ -4633,7 +4734,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
          // Upload: files from the picker, or dropped onto the window.
          let mut files = self.picked_uploads.lock().unwrap().take().unwrap_or_default();
          files.extend(ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_owned()).filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>()));
-@@ -1989,6 +2298,7 @@ impl App {
+@@ -1989,6 +2299,7 @@ impl App {
          }
          if has_window {
              fit_window_to_monitor(ctx);
@@ -4641,7 +4742,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
          }
          // Dev hook: YTM_MINI=<secs>[,<secs>…] switches between the mini player and the
          // full window at those times (YTM_MINI=1: the mini player after a second).
-@@ -2040,12 +2350,18 @@ impl App {
+@@ -2040,12 +2351,18 @@ impl App {
                  ctx.request_repaint_after(Duration::from_millis(250));
              }
          } else if self.np_open && playing && !self.mini.busy() {
@@ -4662,7 +4763,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
          } else if playing || self.buffering {
              ctx.request_repaint_after(Duration::from_millis(250));
          }
-@@ -2106,7 +2422,6 @@ impl eframe::App for App {
+@@ -2106,7 +2423,6 @@ impl eframe::App for App {
          // The full-screen player always keeps the sung lines: its sheet is the whole
          // picture, and the setting only trims the panels.
          ctx.data_mut(|d| d.insert_temp(egui::Id::unique("lyrics-past"), self.show_past_lines || self.fullscreen));
@@ -4670,8 +4771,17 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
          // Once now playing has slid all the way up it hides everything but the player
          // bar, so the pages and the full-screen background under it aren't drawn.
          let covered = !self.fullscreen && np >= 1.0;
-@@ -2143,29 +2458,8 @@ impl eframe::App for App {
-                 .show(ui, |ui| shell::player_bar(self, ui, now, false));
+@@ -2140,32 +2456,16 @@ impl eframe::App for App {
+                 .exact_size(self.bar_height())
+                 .frame(egui::Frame::new())
+                 .show_separator_line(false)
+-                .show(ui, |ui| shell::player_bar(self, ui, now, false));
++                .show(ui, |ui| {
++                    // The pill is dark glass with white ink, whatever the pages are.
++                    let pages = theme::set_mode(&ctx, false);
++                    shell::player_bar(self, ui, now, false);
++                    theme::set_mode(&ctx, pages);
++                });
          }
          if !self.fullscreen && !covered {
 -            use crate::preset::SidebarStyle;
@@ -4702,7 +4812,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
              let section = ui.available_rect_before_wrap();
              let q = theme::anim_bool(&ctx, "queue-drawer", self.queue_open && !self.np_open, 0.25);
              if q > 0.01 {
-@@ -2188,11 +2482,13 @@ impl eframe::App for App {
+@@ -2188,11 +2488,13 @@ impl eframe::App for App {
              let main_right = ui.available_rect_before_wrap().right();
              egui::CentralPanel::default()
                  .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -4718,16 +4828,23 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
                      bottom: 0,
                  }))
                  .show(ui, |ui| {
-@@ -2211,6 +2507,8 @@ impl eframe::App for App {
+@@ -2208,9 +2510,15 @@ impl eframe::App for App {
+                 .order(egui::Order::Middle)
+                 .show(&ctx, |ui| {
+                     ui.scope_builder(egui::UiBuilder::new().max_rect(strip).layout(egui::Layout::top_down(egui::Align::Min)), |ui| {
++                        let pages = theme::set_mode(&ctx, false);
                          shell::player_bar(self, ui, now, true);
++                        theme::set_mode(&ctx, pages);
                      });
                  });
 +            // Mochy's tab bar, as a floating rail on the left edge with the playlists under it.
++            let pages = theme::set_mode(&ctx, false);
 +            tabbar::show(self, &ctx);
++            theme::set_mode(&ctx, pages);
          }
          if np > 0.001 {
              let pages = theme::set_mode(&ctx, false);
-@@ -2223,15 +2521,26 @@ impl eframe::App for App {
+@@ -2223,15 +2531,26 @@ impl eframe::App for App {
          notes::dialog(self, &ctx);
          if let Some(url) = self.share_pending.take() { ctx.copy_text(url); }
          shell::suggestions(self, &ctx);
@@ -4755,7 +4872,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
  
          if dev_var("YTM_THEME_TOUR").is_some() {
              self.theme_tour(&ctx, now);
-@@ -2392,7 +2701,21 @@ impl eframe::App for App {
+@@ -2392,7 +2711,21 @@ impl eframe::App for App {
              storage.set_string("font", theme::font_choice());
          }
          storage.set_string("anim_bg", b(self.anim_bg));
@@ -4777,7 +4894,7 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
          storage.set_string("reactive_bg", b(self.reactive_bg));
          storage.set_string("disable_blur", b(self.disable_blur));
          storage.set_string("animated_artwork", b(self.animated_artwork));
-@@ -2543,6 +2866,43 @@ struct PlayingAs {
+@@ -2543,6 +2876,43 @@ struct PlayingAs {
  }
  
  
@@ -4821,6 +4938,16 @@ index 252e6b9639b34c48935b1d6c20c43a2a14d5a65d..e79a6be6ad600b537546a11f2b3422dd
  /// A restored window size can exceed the monitor (e.g. saved after maximizing),
  /// leaving the player bar partly off-screen. Once at startup, maximize instead.
  fn fit_window_to_monitor(ctx: &egui::Context) {
+@@ -2639,7 +3009,8 @@ pub use crate::model::shuffle;
+ /// can't change while running, and the check touches the disk, so it runs once.
+ fn updatable() -> bool {
+     static UPDATABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+-    *UPDATABLE.get_or_init(|| crate::update::installed() || crate::update::portable_dir().is_some())
++    // Seven has no release feed of its own yet: the checks (which read BitChord's) stay off.
++    *UPDATABLE.get_or_init(|| false)
+ }
+ 
+ pub fn fmt_time(secs: u32) -> String {
 diff --git a/src/ui/notes.rs b/src/ui/notes.rs
 index f0c14b88f7c0ac94ab2e7326588d11aa0c7389ad..d3b21ea159b391a5c0d54ca189058ac1bfede020 100644
 --- a/src/ui/notes.rs
@@ -4844,7 +4971,7 @@ index f0c14b88f7c0ac94ab2e7326588d11aa0c7389ad..d3b21ea159b391a5c0d54ca189058ac1
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc37629e191782848acd4b88d4b8d989158808..790ea7d596f074f56a2182379ae6da6f84d61a6f 100644
+index 28fc37629e191782848acd4b88d4b8d989158808..5fefd0a69e57172e36901b5ed53fb8efb7a1f209 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -70,6 +70,9 @@ pub fn overlay(app: &mut App, ctx: &egui::Context, now: f64) {
@@ -4995,7 +5122,7 @@ index 28fc37629e191782848acd4b88d4b8d989158808..790ea7d596f074f56a2182379ae6da6f
      if miss > 0.0 {
          let ink = theme::with_alpha(theme::text_dim(), miss);
 -        let g = widgets::galley(ui, "No music video for this song on YouTube Music", theme::semibold(15.0), ink, 460.0);
-+        let g = widgets::galley(ui, "No music video for this song on Seven", theme::semibold(15.0), ink, 460.0);
++        let g = widgets::galley(ui, "No music video for this song", theme::semibold(15.0), ink, 460.0);
          ui.painter().galley(pos2(content.center().x - g.size().x / 2.0, area.bottom() - 72.0), g, ink);
          ui.ctx().request_repaint_after(Duration::from_millis(200));
      }
@@ -5531,10 +5658,10 @@ index 28fc37629e191782848acd4b88d4b8d989158808..790ea7d596f074f56a2182379ae6da6f
      let id = id.clone();
 diff --git a/src/ui/offline.rs b/src/ui/offline.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed28836135cd7
+index 0000000000000000000000000000000000000000..93d9cac6be914eda3b0c19fb6815b7bcf5bc1550
 --- /dev/null
 +++ b/src/ui/offline.rs
-@@ -0,0 +1,190 @@
+@@ -0,0 +1,242 @@
 +//! The offline notice.
 +//!
 +//! A small thread tries to reach the internet every few seconds. When it cannot, a black-glass
@@ -5562,6 +5689,10 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +    was_offline: bool,
 +    /// When the connection came back (seconds of UI time): the green notice shows for a few seconds.
 +    online_at: Option<f64>,
++    /// The outage began while a streamed song played, and the downloads took over.
++    switched: bool,
++    /// How many downloaded songs there were when the connection dropped.
++    downloads: usize,
 +}
 +
 +impl Net {
@@ -5581,7 +5712,7 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +                std::thread::sleep(Duration::from_secs(if up { 5 } else { 1 }));
 +            }
 +        });
-+        Self { online, dismissed: false, was_offline: false, online_at: None }
++        Self { online, dismissed: false, was_offline: false, online_at: None, switched: false, downloads: 0 }
 +    }
 +}
 +
@@ -5607,6 +5738,7 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +/// Called once a frame: starts the watcher the first time, and draws the notice while offline.
 +pub fn show(app: &mut App, ctx: &Context, _now: f64) {
 +    let mut back_online = false;
++    let mut went_offline = false;
 +    let (offline, dismissed) = {
 +        let net = app.net.get_or_insert_with(|| Net::start(ctx.clone()));
 +        let offline = !net.online.load(Ordering::Relaxed);
@@ -5614,11 +5746,18 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +            net.was_offline = offline;
 +            net.dismissed = false;
 +            back_online = !offline;
++            went_offline = offline;
++            if !offline {
++                net.switched = false;
++            }
 +            net.online_at = if back_online { Some(ctx.input(|i| i.time)) } else { None };
 +        }
 +        (offline, net.dismissed)
 +    };
 +    let _ = back_online;
++    if went_offline {
++        switch_to_downloads(app);
++    }
 +    back_online_card(app, ctx);
 +    let here = matches!(app.page, Page::Downloads | Page::Local);
 +    let t = theme::anim_bool(ctx, "offline-notice", offline && !dismissed && !here, 0.28);
@@ -5629,8 +5768,10 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +    let screen = ctx.content_rect();
 +    let w = (screen.width() - 32.0).clamp(380.0, 520.0);
 +    let h = 184.0;
++    let (switched, downloads) = app.net.as_ref().map_or((false, 0), |n| (n.switched, n.downloads));
 +    let at = pos2(screen.center().x - w / 2.0, screen.top() + 54.0 - (1.0 - t) * 18.0);
 +    let mut go: Option<Page> = None;
++    let mut play = false;
 +    let mut close = false;
 +    egui::Area::new(egui::Id::new("offline-notice"))
 +        .order(egui::Order::Foreground)
@@ -5645,7 +5786,12 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +            // Title, with a small amber dot, and what is still possible.
 +            p.circle_filled(pos2(rect.left() + 30.0, rect.top() + 34.0), 6.0, Color32::from_rgb(255, 69, 58));
 +            p.text(pos2(rect.left() + 48.0, rect.top() + 34.0), Align2::LEFT_CENTER, "You're offline", theme::bold(20.0), Color32::WHITE);
-+            let galley = p.layout("No internet connection. You can still play your downloads and the music on this device.".to_owned(), theme::regular(14.5), theme::text_dim(), w - 64.0);
++            let body = if switched {
++                "No internet connection. Playing your downloaded songs instead; the music on this device is here too."
++            } else {
++                "No internet connection. You can still play your downloads and the music on this device."
++            };
++            let galley = p.layout(body.to_owned(), theme::regular(14.5), theme::text_dim(), w - 64.0);
 +            p.galley(pos2(rect.left() + 30.0, rect.top() + 60.0), galley, theme::text_dim());
 +
 +            // Close.
@@ -5661,7 +5807,13 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +
 +            // The two ways out.
 +            let mut bx = rect.left() + 24.0;
-+            for (label, page, bw) in [("Downloaded music", Page::Downloads, 184.0), ("Local music", Page::Local, 144.0)] {
++            // With downloads on the device the first button plays them; without, it opens the page.
++            let ways: [(&str, Option<Page>, f32); 2] = if downloads > 0 {
++                [("Play downloads", None, 184.0), ("Local music", Some(Page::Local), 144.0)]
++            } else {
++                [("Downloaded music", Some(Page::Downloads), 184.0), ("Local music", Some(Page::Local), 144.0)]
++            };
++            for (label, page, bw) in ways {
 +                let r = Rect::from_min_size(pos2(bx, rect.bottom() - 22.0 - 42.0), vec2(bw, 42.0));
 +                bx += bw + 12.0;
 +                let resp = ui.interact(r, egui::Id::new(("offline-go", label)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -5669,11 +5821,21 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +                p.rect_filled(r, 21.0, Color32::from_white_alpha((30.0 + 34.0 * hv) as u8));
 +                p.text(r.center(), Align2::CENTER_CENTER, label, theme::semibold(15.0), Color32::WHITE);
 +                if resp.clicked() {
-+                    go = Some(page);
++                    match page {
++                        Some(page) => go = Some(page),
++                        None => play = true,
++                    }
 +                }
 +            }
 +        });
 +
++    if play {
++        let songs = crate::downloads::list();
++        if !songs.is_empty() {
++            app.actions.push(Action::Play(songs, 0));
++        }
++        close = true;
++    }
 +    if let Some(page) = go {
 +        // Out of the player first, if it is up: the pages sit under it.
 +        if app.np_open {
@@ -5725,8 +5887,25 @@ index 0000000000000000000000000000000000000000..c28ff0d8ed29a906a4b02217833ed288
 +            p.text(pos2(rect.left() + 72.0, rect.center().y + 13.0), Align2::LEFT_CENTER, "Your connection is working again.", theme::regular(14.5), theme::text_dim());
 +        });
 +}
++
++/// The connection dropped while a streamed song was playing: carry on with the downloaded
++/// songs instead of letting the music die once the buffer runs out. A song that already plays
++/// from a file, or a paused player, is left alone.
++fn switch_to_downloads(app: &mut App) {
++    let songs = crate::downloads::list();
++    let count = songs.len();
++    let streaming = app.current().is_some_and(|t| crate::downloads::path(&t.id).is_none());
++    let take_over = app.playing() && streaming && count > 0;
++    if take_over {
++        app.actions.push(Action::Play(songs, 0));
++    }
++    if let Some(n) = app.net.as_mut() {
++        n.downloads = count;
++        n.switched = take_over;
++    }
++}
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e8a5472af 100644
+index 899a3c7aafe15717406e41207fd6100b82d1a536..6035ca46032b4cb5f4282645068e0cdab0268287 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
 @@ -65,18 +65,38 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
@@ -5997,8 +6176,8 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
 +    let top = app.stats.top_artists(1).into_iter().next().map(|a| a.0).unwrap_or_else(|| "—".to_owned());
 +    ui.add_space(6.0);
 +    egui::Frame::new()
-+        .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226))
-+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(28)))
++        .fill(if theme::light() { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 235) } else { egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226) })
++        .stroke(egui::Stroke::new(1.0, if theme::light() { egui::Color32::from_black_alpha(26) } else { egui::Color32::from_white_alpha(28) }))
 +        .corner_radius(theme::panel_radius())
 +        .inner_margin(egui::Margin::symmetric(22, 20))
 +        .show(ui, |ui| {
@@ -6102,7 +6281,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
 +fn credit_heading(ui: &mut Ui, title: &str) {
 +    ui.add_space(14.0);
 +    let (line, _) = ui.allocate_exact_size(egui::vec2(ui.available_width().min(260.0), 1.0), Sense::hover());
-+    ui.painter().rect_filled(line, 0.0, egui::Color32::from_white_alpha(28));
++    ui.painter().rect_filled(line, 0.0, if theme::light() { egui::Color32::from_black_alpha(26) } else { egui::Color32::from_white_alpha(28) });
 +    ui.add_space(18.0);
 +    ui.label(egui::RichText::new(title).font(theme::semibold(11.0)).color(theme::text_faint()));
 +    ui.add_space(12.0);
@@ -6121,15 +6300,15 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
 +    }
 +    section_label(ui, "About Seven", None);
 +    egui::Frame::new()
-+        .fill(egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226))
-+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(40)))
++        .fill(if theme::light() { egui::Color32::from_rgba_unmultiplied(255, 255, 255, 235) } else { egui::Color32::from_rgba_unmultiplied(0, 0, 0, 226) })
++        .stroke(egui::Stroke::new(1.0, if theme::light() { egui::Color32::from_black_alpha(30) } else { egui::Color32::from_white_alpha(40) }))
 +        .corner_radius(theme::panel_radius())
 +        .inner_margin(egui::Margin::symmetric(24, 28))
 +        .show(ui, |ui| {
 +            ui.set_width(ui.available_width());
 +            ui.vertical_centered(|ui| {
 +                let (r, _) = ui.allocate_exact_size(egui::vec2(104.0, 70.0), Sense::hover());
-+                super::shell::mark(ui, r, egui::Color32::WHITE);
++                super::shell::mark(ui, r, theme::text());
 +                ui.add_space(10.0);
 +                ui.label(egui::RichText::new("Seven").font(theme::bold(40.0)).color(theme::text()));
 +                ui.label(egui::RichText::new("Music in black and glass.").font(theme::regular(14.0)).color(theme::text_dim()));
@@ -6223,7 +6402,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
          });
          divider(ui);
 -        setting_row(ui, "Volume normalization", Some("Turn loud songs down to the same level, like YouTube Music does."), |ui| {
-+        setting_row(ui, "Volume normalization", Some("Turn loud songs down to the same level, like Seven does."), |ui| {
++        setting_row(ui, "Volume normalization", Some("Turn loud songs down to the same level, like streaming apps do."), |ui| {
              if toggle(ui, &mut app.normalize, "Volume normalization").changed() {
                  app.audio.set_normalize(app.normalize);
              }
@@ -6232,7 +6411,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
          });
          divider(ui);
 -        setting_row(ui, "Play songs, not music videos", Some("An official music video plays as its song, the album recording, when YouTube Music has one: no intros, skits or video-only edits, and the radio keeps videos and podcast episodes out of the queue it fills for you. Lists still show and play what they hold."), |ui| {
-+        setting_row(ui, "Play songs, not music videos", Some("An official music video plays as its song, the album recording, when Seven has one: no intros, skits or video-only edits, and the radio keeps videos and podcast episodes out of the queue it fills for you. Lists still show and play what they hold."), |ui| {
++        setting_row(ui, "Play songs, not music videos", Some("An official music video plays as its song, the album recording, when the catalogue has one: no intros, skits or video-only edits, and the radio keeps videos and podcast episodes out of the queue it fills for you. Lists still show and play what they hold."), |ui| {
              toggle(ui, &mut app.play_songs, "Play songs, not music videos");
          });
          divider(ui);
@@ -6295,7 +6474,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
      section_label(ui, "Player appearance", None);
      settings_card(ui, |ui| {
 -        setting_row(ui, "HD music videos", Some("Ask YouTube Music for the music video at up to 1080p rather than 720p. The clip comes down whole before the first picture shows, so the higher picture is a longer wait and a bigger file in the cache."), |ui| {
-+        setting_row(ui, "HD music videos", Some("Ask Seven for the music video at up to 1080p rather than 720p. The clip comes down whole before the first picture shows, so the higher picture is a longer wait and a bigger file in the cache."), |ui| {
++        setting_row(ui, "HD music videos", Some("Ask for the music video at up to 1080p rather than 720p. The clip comes down whole before the first picture shows, so the higher picture is a longer wait and a bigger file in the cache."), |ui| {
              toggle(ui, &mut app.video_hd, "HD music videos");
          });
          divider(ui);
@@ -6384,7 +6563,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
          Some(Some((_, msg))) => msg.clone(),
          Some(None) => "Checking…".to_owned(),
 -        None => "Checks that YouTube Music answers through this setting.".to_owned(),
-+        None => "Checks that Seven answers through this setting.".to_owned(),
++        None => "Checks that the service answers through this setting.".to_owned(),
      };
      setting_row(ui, "Test connection", Some(&desc), |ui| {
          if matches!(result, Some(None)) {
@@ -6393,7 +6572,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
              app.backend.spawn(async move {
                  let out = match proxy::test(&s).await {
 -                    Ok(t) => (true, format!("Working: YouTube Music answered in {} ms.", t.as_millis())),
-+                    Ok(t) => (true, format!("Working: Seven answered in {} ms.", t.as_millis())),
++                    Ok(t) => (true, format!("Working: the service answered in {} ms.", t.as_millis())),
                      Err(e) => (false, format!("Didn't connect: {e:#}")),
                  };
                  *slot.lock().unwrap() = Some(Some(out));
@@ -6468,7 +6647,7 @@ index 899a3c7aafe15717406e41207fd6100b82d1a536..32088a3691b75a08a9cfd91469cc849e
      if !settings_group_shown(ui) {
          return;
 diff --git a/src/ui/responses.rs b/src/ui/responses.rs
-index 706e59a88c90836da19663c0cc8378896346c01d..9e1a5f6e138aec9e7e477833f1ffa6345200c4b8 100644
+index 706e59a88c90836da19663c0cc8378896346c01d..54210ec086b745c89269465182bfc729293daaf7 100644
 --- a/src/ui/responses.rs
 +++ b/src/ui/responses.rs
 @@ -289,7 +289,7 @@ impl App {
@@ -6476,7 +6655,7 @@ index 706e59a88c90836da19663c0cc8378896346c01d..9e1a5f6e138aec9e7e477833f1ffa634
                  let songs = |n: usize| if n == 1 { "1 song".to_owned() } else { format!("{n} songs") };
                  self.toast(match (done, failed.len()) {
 -                    (_, 0) => format!("Uploaded {}. It can take a minute for YouTube Music to finish processing.", songs(done)),
-+                    (_, 0) => format!("Uploaded {}. It can take a minute for Seven to finish processing.", songs(done)),
++                    (_, 0) => format!("Uploaded {}. It can take a minute for the upload to finish processing.", songs(done)),
                      (0, _) => format!("Upload failed: {}", failed.join(", ")),
                      _ => format!("Uploaded {}; failed: {}", songs(done), failed.join(", ")),
                  });
@@ -6485,7 +6664,7 @@ index 706e59a88c90836da19663c0cc8378896346c01d..9e1a5f6e138aec9e7e477833f1ffa634
                      Some(t) => self.actions.push(Action::Open(t)),
                      None if name.is_empty() => {}
 -                    None => self.toast(format!("YouTube Music has no copy of {name}.")),
-+                    None => self.toast(format!("Seven has no copy of {name}.")),
++                    None => self.toast(format!("No copy of {name} was found.")),
                  }
              }
              Resp::Moods(moods) => {
@@ -6494,7 +6673,7 @@ index 706e59a88c90836da19663c0cc8378896346c01d..9e1a5f6e138aec9e7e477833f1ffa634
                      self.toast("Waiting for the transfer to finish adding to Liked Music…");
                  } else if total > 1 && done < total {
 -                    let note = if self.backend.api().limited() { " (YouTube Music is limiting requests; waiting)" } else { "" };
-+                    let note = if self.backend.api().limited() { " (Seven is limiting requests; waiting)" } else { "" };
++                    let note = if self.backend.api().limited() { " (The service is limiting requests; waiting)" } else { "" };
                      self.toast(format!("{} {done} of {total} songs…{note}", if like { "Liking" } else { "Removing likes" }));
                  }
              }
@@ -6503,10 +6682,10 @@ index 706e59a88c90836da19663c0cc8378896346c01d..9e1a5f6e138aec9e7e477833f1ffa634
          let mut msg = format!("{} {count} {}", if like { "Liked" } else { "Removed likes from" }, if count == 1 { "song" } else { "songs" });
          if count == 0 {
 -            msg = format!("YouTube Music refused all {} songs; try again in a little while", failed.len());
-+            msg = format!("Seven refused all {} songs; try again in a little while", failed.len());
++            msg = format!("The service refused all {} songs; try again in a little while", failed.len());
          } else if !failed.is_empty() {
 -            msg += &format!("; YouTube Music refused {}", failed.len());
-+            msg += &format!("; Seven refused {}", failed.len());
++            msg += &format!("; the service refused {}", failed.len());
          }
          self.toast(msg);
      }
@@ -6520,7 +6699,7 @@ index 706e59a88c90836da19663c0cc8378896346c01d..9e1a5f6e138aec9e7e477833f1ffa634
          Some("Sign in to play \"{title}\"")
      } else {
 diff --git a/src/ui/shell.rs b/src/ui/shell.rs
-index 96240d41c1c4e71d55a622e31abdf22e079851c7..6be566e3efe87bcf0cadce0d5f6e551ea0418a2c 100644
+index 96240d41c1c4e71d55a622e31abdf22e079851c7..868fdfd9f4d619122a488385d828111cbd0d9e76 100644
 --- a/src/ui/shell.rs
 +++ b/src/ui/shell.rs
 @@ -61,7 +61,8 @@ pub fn base_color(app: &App) -> Color32 {
@@ -6529,7 +6708,7 @@ index 96240d41c1c4e71d55a622e31abdf22e079851c7..6be566e3efe87bcf0cadce0d5f6e551e
  pub fn page_ground(app: &App) -> Color32 {
 -    if app.page_blobs { base_color(app) } else if theme::light() { theme::bg() } else { Color32::BLACK }
 +    // Home stays plain black (light: the theme's own background), whatever plays.
-+    if app.page == Page::Home && !app.home_tint { if theme::light() { theme::bg() } else { Color32::BLACK } } else if app.page_blobs { base_color(app) } else if theme::light() { theme::bg() } else { Color32::BLACK }
++    if theme::light() { theme::bg() } else if app.page == Page::Home && !app.home_tint { Color32::BLACK } else if app.page_blobs { base_color(app) } else { Color32::BLACK }
  }
  
  pub fn background(app: &mut App, ui: &mut Ui, screen: Rect, now: f64, only: Option<Rect>) {
@@ -7623,7 +7802,7 @@ index c5555a8359860965701ec45994bb251aad325e64..49e3397ce5bf4146e555324c53e26fca
              // sizing (maximized), kept.
              let r = params.rgrc[0];
 diff --git a/src/ui/transfer.rs b/src/ui/transfer.rs
-index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b54199626f77a753 100644
+index 821455d98abee811404bd2fc2d07528700291354..c3f76312650985c05833a998276346e88b27ed72 100644
 --- a/src/ui/transfer.rs
 +++ b/src/ui/transfer.rs
 @@ -202,12 +202,12 @@ fn setup(app: &mut App, ui: &mut Ui) {
@@ -7631,13 +7810,13 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
      });
      ui.add_space(4.0);
 -    dim(ui, "Copy your Liked Songs or any playlist into YouTube Music. It runs in the background, so you can keep listening.");
-+    dim(ui, "Copy your Liked Songs or any playlist into Seven. It runs in the background, so you can keep listening.");
++    dim(ui, "Copy your Liked Songs or any playlist into your library. It runs in the background, so you can keep listening.");
      ui.add_space(18.0);
  
      if !app.logged_in {
          settings_card(ui, |ui| {
 -            setting_row(ui, "Sign in to YouTube Music first", Some("The songs go into your YouTube Music account."), |ui| {
-+            setting_row(ui, "Sign in to Seven first", Some("The songs go into your Seven account."), |ui| {
++            setting_row(ui, "Sign in first", Some("The songs go into your account."), |ui| {
                  if pill(ui, "Go to Settings", None, true).clicked() {
                      app.actions.push(Action::Go(Page::Settings));
                  }
@@ -7655,7 +7834,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
          small_caps(ui, "3 · WHERE SHOULD THEY GO?");
          for (to_liked, title, desc) in [
 -            (true, "Add to your Liked Music", "Likes each song on YouTube Music, in Spotify's order. Songs you already like stay as they are."),
-+            (true, "Add to your Liked Music", "Likes each song on Seven, in Spotify's order. Songs you already like stay as they are."),
++            (true, "Add to your Liked Music", "Likes each song in your library, in Spotify's order. Songs you already like stay as they are."),
              (false, "Make a new playlist", "A private playlist with these songs."),
          ] {
              let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 62.0), Sense::click());
@@ -7664,7 +7843,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
          ui.add_space(10.0);
      } else {
 -        small_caps(ui, "3 · NEW YOUTUBE MUSIC PLAYLIST");
-+        small_caps(ui, "3 · NEW SEVEN PLAYLIST");
++        small_caps(ui, "3 · NEW PLAYLIST");
      }
      dim(ui, "Name");
      ui.add_space(6.0);
@@ -7673,7 +7852,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
          Phase::Saving if let Some((done, of)) = job.redo => (
              fmt_n(done),
 -            format!("of {} songs liked again: YouTube Music dropped them", fmt_n(of)),
-+            format!("of {} songs liked again: Seven dropped them", fmt_n(of)),
++            format!("of {} songs liked again: the service dropped them", fmt_n(of)),
              done as f32 / of.max(1) as f32,
              Some("checking Liked Music".to_owned()),
          ),
@@ -7682,7 +7861,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
      } else if limited && job.phase.running() {
          // YouTube Music refused requests: everything waits a little, then carries on.
 -        Some("YouTube Music is limiting requests; carrying on in a moment".to_owned())
-+        Some("Seven is limiting requests; carrying on in a moment".to_owned())
++        Some("The service is limiting requests; carrying on in a moment".to_owned())
      } else {
          eta
      };
@@ -7718,7 +7897,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
                  ui.add_space(12.0);
                  ui.horizontal(|ui| {
 -                    ui.label(RichText::new("PICK THE RIGHT ONE ON YOUTUBE MUSIC").font(theme::bold(11.5)).color(theme::text_faint()));
-+                    ui.label(RichText::new("PICK THE RIGHT ONE ON SEVEN").font(theme::bold(11.5)).color(theme::text_faint()));
++                    ui.label(RichText::new("PICK THE RIGHT MATCH").font(theme::bold(11.5)).color(theme::text_faint()));
                      ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 -                        search = pill(ui, "Search YouTube Music", Some(icon::SEARCH), false).on_hover_text("Not in the list? Find it yourself").clicked();
 +                        search = pill(ui, "Search Seven", Some(icon::SEARCH), false).on_hover_text("Not in the list? Find it yourself").clicked();
@@ -7738,7 +7917,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
                              });
                          } else if d.candidates.is_empty() && current_label.is_none() {
 -                            dim(ui, "Nothing on YouTube Music looks like this song.");
-+                            dim(ui, "Nothing on Seven looks like this song.");
++                            dim(ui, "Nothing in the catalogue looks like this song.");
                          }
                          for (k, c) in d.candidates.iter().enumerate() {
                              if candidate_row(ui, c, d.videos[k], current == Some(k), picked == Some(k), accent, &mut acts) {
@@ -7747,7 +7926,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
          stats.push((fmt_n(sum.already), "Already liked", false));
      }
 -    stats.extend([(fmt_n(sum.duplicates), "Duplicates, added once", false), (fmt_n(skipped), "Skipped in review", false), (fmt_n(missing), "Not on YouTube Music", false)]);
-+    stats.extend([(fmt_n(sum.duplicates), "Duplicates, added once", false), (fmt_n(skipped), "Skipped in review", false), (fmt_n(missing), "Not on Seven", false)]);
++    stats.extend([(fmt_n(sum.duplicates), "Duplicates, added once", false), (fmt_n(skipped), "Skipped in review", false), (fmt_n(missing), "Not found", false)]);
      stat_row(ui, &stats, accent);
      ui.add_space(20.0);
  
@@ -7756,7 +7935,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
          .zip(&job.results)
          .filter_map(|(t, r)| match r {
 -            Search::Missing => Some((t, "Not on YouTube Music")),
-+            Search::Missing => Some((t, "Not on Seven")),
++            Search::Missing => Some((t, "Not found")),
              Search::Skipped => Some((t, "Skipped in review")),
              _ => None,
          })
@@ -7765,7 +7944,7 @@ index 821455d98abee811404bd2fc2d07528700291354..424bbf4d4a892ec614c66c56b5419962
          let tw = rect.right() - x - 120.0;
          ui.painter().text(pos2(x, rect.center().y - 10.0), Align2::LEFT_CENTER, "Transfer from Spotify", theme::semibold(14.5), theme::text());
 -        let g = widgets::galley_wrapped(ui, "Copy your Liked Songs or any playlist into YouTube Music. It runs in the background, so you can keep listening.", theme::regular(12.5), theme::text_dim(), tw, 2);
-+        let g = widgets::galley_wrapped(ui, "Copy your Liked Songs or any playlist into Seven. It runs in the background, so you can keep listening.", theme::regular(12.5), theme::text_dim(), tw, 2);
++        let g = widgets::galley_wrapped(ui, "Copy your Liked Songs or any playlist into your library. It runs in the background, so you can keep listening.", theme::regular(12.5), theme::text_dim(), tw, 2);
          ui.painter().galley(pos2(x, rect.center().y + 2.0), g, theme::text_dim());
          let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
          open = pill(&mut child, "Open", None, true).clicked();
@@ -7985,7 +8164,7 @@ index f44bea11c75bc5019853119b04bd598490cb1843..2d9ef81ce84cbc0fe56a6a2609dcc92a
          // An artist page's row links the release under its title; every other row links
          // the artists the line names.
 diff --git a/src/webmusic.rs b/src/webmusic.rs
-index c22c839ba2868fc746bddcbd34699b4a61894dd1..f07222c373812cd2a9872f3f4aebe623f6063387 100644
+index c22c839ba2868fc746bddcbd34699b4a61894dd1..e1312862e53f74571adee85a2081399126e7448c 100644
 --- a/src/webmusic.rs
 +++ b/src/webmusic.rs
 @@ -299,7 +299,7 @@ impl Session {
@@ -7993,12 +8172,12 @@ index c22c839ba2868fc746bddcbd34699b4a61894dd1..f07222c373812cd2a9872f3f4aebe623
              .get("X-Goog-Upload-URL")
              .and_then(|v| v.to_str().ok())
 -            .ok_or_else(|| anyhow::anyhow!("YouTube Music didn't accept the upload"))?
-+            .ok_or_else(|| anyhow::anyhow!("Seven didn't accept the upload"))?
++            .ok_or_else(|| anyhow::anyhow!("The service didn't accept the upload"))?
              .to_owned();
          req(&url)?
              .header("X-Goog-Upload-Command", "upload, finalize")
 diff --git a/src/ytm.rs b/src/ytm.rs
-index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d093e46f48 100644
+index 16016e6fe99b23d633f9d06329abcd5d2592df10..ec81d1bd5b38cb5100cb240adc8b0ef267d5dc97 100644
 --- a/src/ytm.rs
 +++ b/src/ytm.rs
 @@ -213,7 +213,7 @@ fn named(item: &Value) -> Option<Suggestion> {
@@ -8006,7 +8185,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
  pub async fn forget_search(api: &Api, token: &str) -> anyhow::Result<()> {
      let v = api.call_signed_in("feedback", json!({ "feedbackTokens": [token] })).await?;
 -    anyhow::ensure!(v["feedbackResponses"][0]["isProcessed"] == true, "YouTube Music didn't remove it");
-+    anyhow::ensure!(v["feedbackResponses"][0]["isProcessed"] == true, "Seven didn't remove it");
++    anyhow::ensure!(v["feedbackResponses"][0]["isProcessed"] == true, "It wasn't removed");
      Ok(())
  }
  
@@ -8015,7 +8194,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
  pub async fn album(api: &Api, id: &str) -> anyhow::Result<Collection> {
      let v = api.call("browse", json!({ "browseId": id }), false).await?;
 -    let (mut a, videos) = parse_album(&v, id).ok_or_else(|| anyhow::anyhow!("YouTube Music returned an empty album"))?;
-+    let (mut a, videos) = parse_album(&v, id).ok_or_else(|| anyhow::anyhow!("Seven returned an empty album"))?;
++    let (mut a, videos) = parse_album(&v, id).ok_or_else(|| anyhow::anyhow!("The service returned an empty album"))?;
      if !videos.is_empty() {
          songs_for_videos(&mut a, &videos).await;
      }
@@ -8024,7 +8203,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
          // A session Google has revoked still gets answers, just signed-out ones.
          anyhow::ensure!(!(auth && api.account().is_some() && crate::ytmapi::logged_out(&v)), "Your YouTube sign-in has expired");
 -        anyhow::bail!("YouTube Music returned an empty playlist");
-+        anyhow::bail!("Seven returned an empty playlist");
++        anyhow::bail!("The service returned an empty playlist");
      };
      // Mixes (RD…) continue without end: stop at the length the header gives, or at 500.
      let all = count.map_or(if id.starts_with("RD") { 500 } else { usize::MAX }, |c| c as usize);
@@ -8033,7 +8212,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
  pub async fn artist(api: &Api, id: &str) -> anyhow::Result<ArtistPage> {
      let v = api.call("browse", json!({ "browseId": id }), false).await?;
 -    let mut page = parse_artist(&v, id).ok_or_else(|| anyhow::anyhow!("YouTube Music returned an empty artist page"))?;
-+    let mut page = parse_artist(&v, id).ok_or_else(|| anyhow::anyhow!("Seven returned an empty artist page"))?;
++    let mut page = parse_artist(&v, id).ok_or_else(|| anyhow::anyhow!("The service returned an empty artist page"))?;
      // A page's carousels hold only the rowful that fits; each release shelf's title links
      // to the page that holds the rest, which is what "Show all" is meant to list.
      for (browse, params) in release_endpoints(&v) {
@@ -8042,7 +8221,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
          }
      }
 -    anyhow::ensure!(!out.is_empty(), "YouTube Music's mood grid came back empty");
-+    anyhow::ensure!(!out.is_empty(), "Seven's mood grid came back empty");
++    anyhow::ensure!(!out.is_empty(), "The mood grid came back empty");
      Ok(out)
  }
  
@@ -8051,7 +8230,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
          }
      }
 -    anyhow::ensure!(!tied.is_empty(), "YouTube Music has no playlists for {}", mood.name);
-+    anyhow::ensure!(!tied.is_empty(), "Seven has no playlists for {}", mood.name);
++    anyhow::ensure!(!tied.is_empty(), "No playlists found for {}", mood.name);
      crate::model::shuffle(&mut tied);
      let mut ids = tied.remove(0);
      ids.truncate(6);
@@ -8060,7 +8239,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
      let value = api.call_signed_in(endpoint, body).await?;
      if value["status"].as_str().is_some_and(|s| !s.contains("SUCCEEDED")) {
 -        anyhow::bail!("YouTube Music rejected the change");
-+        anyhow::bail!("Seven rejected the change");
++        anyhow::bail!("The service rejected the change");
      }
      Ok(value)
  }
@@ -8069,7 +8248,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
      }
      let value = write(api, "playlist/create", body).await?;
 -    value["playlistId"].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("YouTube Music did not return a playlist"))
-+    value["playlistId"].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("Seven did not return a playlist"))
++    value["playlistId"].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("The service did not return a playlist"))
  }
  
  /// Create a private playlist holding `video_ids` (a few hundred at most; add more with [`add_videos`]).
@@ -8078,7 +8257,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
      let title: String = title.chars().filter(|c| !matches!(c, '<' | '>')).collect();
      let value = write(api, "playlist/create", json!({"title": title, "description": "", "privacyStatus": "PRIVATE", "videoIds": video_ids})).await?;
 -    value["playlistId"].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("YouTube Music did not return a playlist"))
-+    value["playlistId"].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("Seven did not return a playlist"))
++    value["playlistId"].as_str().map(str::to_owned).ok_or_else(|| anyhow::anyhow!("The service did not return a playlist"))
  }
  
  /// Add songs to a playlist in one request, skipping any already in it.
@@ -8087,7 +8266,7 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
          .iter()
          .find_map(|command| command["handlePlaylistDeletionCommand"]["playlistId"].as_str());
 -    anyhow::ensure!(deleted_id == Some(id), "YouTube Music did not confirm playlist deletion");
-+    anyhow::ensure!(deleted_id == Some(id), "Seven did not confirm playlist deletion");
++    anyhow::ensure!(deleted_id == Some(id), "Deletion wasn't confirmed");
      Ok(())
  }
  
@@ -8096,12 +8275,12 @@ index 16016e6fe99b23d633f9d06329abcd5d2592df10..952bba830bfa3d6f9e47cddb5705d6d0
          // A private playlist has no panel until it's made visible: collaboration is off,
          // and turning it on goes through the plain edits.
 -        anyhow::ensure!(private, "YouTube Music doesn't offer collaboration on this playlist");
-+        anyhow::ensure!(private, "Seven doesn't offer collaboration on this playlist");
++        anyhow::ensure!(private, "Collaboration isn't offered on this playlist");
          return Ok(Collaboration { playlist_id: playlist_id.to_owned(), private, on: false, allow_new: false, invite_link: None, collaborators: Vec::new(), turn_on: None, turn_off: None, allow: None, revoke: None });
      };
      let panel = api.call_signed_in("get_panel", json!({"panelId": "PAplaylist_collaborate", "params": params})).await?;
 diff --git a/src/ytmapi.rs b/src/ytmapi.rs
-index 90e66f6e8e284fc1222d455603588d347b75e6ba..30b0dad6ec822d25dc8fbf53951e821ebc8fcd7f 100644
+index 90e66f6e8e284fc1222d455603588d347b75e6ba..3375380e8ef86ae60ed3d796e1657c70e5e4f8df 100644
 --- a/src/ytmapi.rs
 +++ b/src/ytmapi.rs
 @@ -63,7 +63,7 @@ struct Unavailable;
@@ -8109,7 +8288,7 @@ index 90e66f6e8e284fc1222d455603588d347b75e6ba..30b0dad6ec822d25dc8fbf53951e821e
  impl std::fmt::Display for Unavailable {
      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 -        f.write_str("YouTube Music isn't available where your proxy connects from. Try another proxy or server (Settings › Network)")
-+        f.write_str("Seven isn't available where your proxy connects from. Try another proxy or server (Settings › Network)")
++        f.write_str("The service isn't available where your proxy connects from. Try another proxy or server (Settings › Network)")
      }
  }
  
@@ -8118,7 +8297,7 @@ index 90e66f6e8e284fc1222d455603588d347b75e6ba..30b0dad6ec822d25dc8fbf53951e821e
          let until = now_ms() + ms;
          if self.paused_until.fetch_max(until, Relaxed) < until {
 -            log::info!("{endpoint}: YouTube Music is limiting this account's requests; pausing them for {} s", ms / 1000);
-+            log::info!("{endpoint}: Seven is limiting this account's requests; pausing them for {} s", ms / 1000);
++            log::info!("{endpoint}: The service is limiting this account's requests; pausing them for {} s", ms / 1000);
          }
      }
  
@@ -8129,9 +8308,9 @@ index 90e66f6e8e284fc1222d455603588d347b75e6ba..30b0dad6ec822d25dc8fbf53951e821e
 -            (401, _) => f.write_str("YouTube Music signed this session out; sign in again"),
 -            (_, true) => write!(f, "YouTube Music returned HTTP {}", self.status),
 -            (_, false) => write!(f, "YouTube Music returned HTTP {}: {}", self.status, self.msg),
-+            (401, _) => f.write_str("Seven signed this session out; sign in again"),
-+            (_, true) => write!(f, "Seven returned HTTP {}", self.status),
-+            (_, false) => write!(f, "Seven returned HTTP {}: {}", self.status, self.msg),
++            (401, _) => f.write_str("You were signed out; sign in again"),
++            (_, true) => write!(f, "The service returned HTTP {}", self.status),
++            (_, false) => write!(f, "The service returned HTTP {}: {}", self.status, self.msg),
          }
      }
  }
