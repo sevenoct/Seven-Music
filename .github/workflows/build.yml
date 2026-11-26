@@ -2,6 +2,10 @@ name: build
 
 on: push
 
+# A release needs to be allowed to write to the repository.
+permissions:
+  contents: write
+
 env:
   PATCH: seven.patch
   # The BitChord source this app is built from (commit 7ed3e48), kept in this repo as one zip
@@ -59,3 +63,21 @@ jobs:
         with:
           name: Seven-windows
           path: dist/*
+
+      # Push a tag that starts with v (for example v1.0.0) and the build is also published as a
+      # GitHub release: Seven.exe on its own, and a zip with WebView2Loader.dll beside it.
+      - name: Zip for the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath Seven-windows.zip -Force
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" Seven-windows.zip dist/Seven.exe \
+            --repo "$GITHUB_REPOSITORY" --title "Seven $GITHUB_REF_NAME" --generate-notes \
+            || gh release upload "$GITHUB_REF_NAME" Seven-windows.zip dist/Seven.exe \
+            --repo "$GITHUB_REPOSITORY" --clobber
