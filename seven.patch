@@ -3669,7 +3669,7 @@ index 249fb6f..b81defb 100644
              && (sresp.clicked() || sresp.dragged())
          {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..d1ca7cb 100644
+index 252e6b9..f5abe57 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,9 @@ mod backdrop;
@@ -3700,7 +3700,7 @@ index 252e6b9..d1ca7cb 100644
      Album(String),
      Playlist(String),
      Artist(String),
-@@ -942,7 +948,21 @@ pub struct App {
+@@ -942,7 +948,23 @@ pub struct App {
      /// Light or dark pages (the ytm-rs theme's; see `light_pages`).
      appearance: theme::Appearance,
      anim_bg: bool,
@@ -3719,10 +3719,12 @@ index 252e6b9..d1ca7cb 100644
 +    home_tint: bool,
 +    /// Keeps the previous maximised player (glass capsules, reflection, volume up top).
 +    old_player: bool,
++    /// Now Playing's flat background becomes a multi-colour gradient from the cover.
++    np_gradient: bool,
      reactive_bg: bool,
      /// Power saver: the shader blurs behind pages and the player stand down for a flat
      /// ambient tint, which costs an integrated GPU almost nothing.
-@@ -1387,13 +1407,20 @@ impl App {
+@@ -1387,13 +1409,21 @@ impl App {
              disable_direct_stream,
              background_art: None,
              art_changed: -10.0,
@@ -3741,10 +3743,11 @@ index 252e6b9..d1ca7cb 100644
              page_blobs: get("page_blobs").is_some_and(|v| v == "1"),
 +            home_tint: get("home_tint").is_some_and(|v| v == "1"),
 +            old_player: get("old_player").is_some_and(|v| v == "1"),
++            np_gradient: get("np_gradient").is_some_and(|v| v == "1"),
              reactive_bg: get("reactive_bg").is_none_or(|v| v == "1"),
              disable_blur: get("disable_blur").is_some_and(|v| v == "1"),
              animated_artwork: get("animated_artwork").is_some_and(|v| v == "1"),
-@@ -1817,7 +1844,7 @@ impl App {
+@@ -1817,7 +1847,7 @@ impl App {
          // With the icon tint off, a preset that borrows the cover's colour keeps the app's
          // own red instead; a preset that names its own colour is untouched by the switch.
          let untinted = !self.icon_tint && self.look().accent == "cover";
@@ -3753,7 +3756,7 @@ index 252e6b9..d1ca7cb 100644
          if theme::light() {
              // A pale cover colour would barely show on light pages: deepen it.
              let luma = 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
-@@ -1830,8 +1857,9 @@ impl App {
+@@ -1830,8 +1860,9 @@ impl App {
  
      /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
      /// Settings › Appearance › Mode.
@@ -3765,7 +3768,7 @@ index 252e6b9..d1ca7cb 100644
      }
  
      /// The active theme preset. Synced once per frame (`sync_look`), so this is a plain
-@@ -1929,6 +1957,16 @@ impl App {
+@@ -1929,6 +1960,16 @@ impl App {
              m.set_playing(playing);
          }
          self.request_lyric_extras();
@@ -3782,7 +3785,7 @@ index 252e6b9..d1ca7cb 100644
          // Upload: files from the picker, or dropped onto the window.
          let mut files = self.picked_uploads.lock().unwrap().take().unwrap_or_default();
          files.extend(ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_owned()).filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>()));
-@@ -1989,6 +2027,7 @@ impl App {
+@@ -1989,6 +2030,7 @@ impl App {
          }
          if has_window {
              fit_window_to_monitor(ctx);
@@ -3790,7 +3793,7 @@ index 252e6b9..d1ca7cb 100644
          }
          // Dev hook: YTM_MINI=<secs>[,<secs>…] switches between the mini player and the
          // full window at those times (YTM_MINI=1: the mini player after a second).
-@@ -2040,12 +2079,18 @@ impl App {
+@@ -2040,12 +2082,18 @@ impl App {
                  ctx.request_repaint_after(Duration::from_millis(250));
              }
          } else if self.np_open && playing && !self.mini.busy() {
@@ -3811,7 +3814,7 @@ index 252e6b9..d1ca7cb 100644
          } else if playing || self.buffering {
              ctx.request_repaint_after(Duration::from_millis(250));
          }
-@@ -2106,7 +2151,6 @@ impl eframe::App for App {
+@@ -2106,7 +2154,6 @@ impl eframe::App for App {
          // The full-screen player always keeps the sung lines: its sheet is the whole
          // picture, and the setting only trims the panels.
          ctx.data_mut(|d| d.insert_temp(egui::Id::unique("lyrics-past"), self.show_past_lines || self.fullscreen));
@@ -3819,7 +3822,7 @@ index 252e6b9..d1ca7cb 100644
          // Once now playing has slid all the way up it hides everything but the player
          // bar, so the pages and the full-screen background under it aren't drawn.
          let covered = !self.fullscreen && np >= 1.0;
-@@ -2143,29 +2187,8 @@ impl eframe::App for App {
+@@ -2143,29 +2190,8 @@ impl eframe::App for App {
                  .show(ui, |ui| shell::player_bar(self, ui, now, false));
          }
          if !self.fullscreen && !covered {
@@ -3851,7 +3854,7 @@ index 252e6b9..d1ca7cb 100644
              let section = ui.available_rect_before_wrap();
              let q = theme::anim_bool(&ctx, "queue-drawer", self.queue_open && !self.np_open, 0.25);
              if q > 0.01 {
-@@ -2188,11 +2211,13 @@ impl eframe::App for App {
+@@ -2188,11 +2214,13 @@ impl eframe::App for App {
              let main_right = ui.available_rect_before_wrap().right();
              egui::CentralPanel::default()
                  .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -3867,7 +3870,7 @@ index 252e6b9..d1ca7cb 100644
                      bottom: 0,
                  }))
                  .show(ui, |ui| {
-@@ -2211,6 +2236,8 @@ impl eframe::App for App {
+@@ -2211,6 +2239,8 @@ impl eframe::App for App {
                          shell::player_bar(self, ui, now, true);
                      });
                  });
@@ -3876,7 +3879,7 @@ index 252e6b9..d1ca7cb 100644
          }
          if np > 0.001 {
              let pages = theme::set_mode(&ctx, false);
-@@ -2226,12 +2253,14 @@ impl eframe::App for App {
+@@ -2226,12 +2256,14 @@ impl eframe::App for App {
          shell::toast(self, &ctx, now);
  
          // The player keeps the window buttons too: the top right stays the window's.
@@ -3892,7 +3895,7 @@ index 252e6b9..d1ca7cb 100644
  
          if dev_var("YTM_THEME_TOUR").is_some() {
              self.theme_tour(&ctx, now);
-@@ -2392,7 +2421,13 @@ impl eframe::App for App {
+@@ -2392,7 +2424,14 @@ impl eframe::App for App {
              storage.set_string("font", theme::font_choice());
          }
          storage.set_string("anim_bg", b(self.anim_bg));
@@ -3903,10 +3906,11 @@ index 252e6b9..d1ca7cb 100644
          storage.set_string("page_blobs", b(self.page_blobs));
 +        storage.set_string("home_tint", b(self.home_tint));
 +        storage.set_string("old_player", b(self.old_player));
++        storage.set_string("np_gradient", b(self.np_gradient));
          storage.set_string("reactive_bg", b(self.reactive_bg));
          storage.set_string("disable_blur", b(self.disable_blur));
          storage.set_string("animated_artwork", b(self.animated_artwork));
-@@ -2543,6 +2578,43 @@ struct PlayingAs {
+@@ -2543,6 +2582,43 @@ struct PlayingAs {
  }
  
  
@@ -3973,10 +3977,92 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..c9bb6fd 100644
+index 28fc376..3fabad2 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
-@@ -296,10 +296,22 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -70,6 +70,9 @@ pub fn overlay(app: &mut App, ctx: &egui::Context, now: f64) {
+     let picture = if app.video_on { app.video.frame(ctx) } else { None };
+     let look = app.look();
+     let b = &look.background;
++    // The gradient's nine colours, read off the cover's blurred 64x64 field: it only
++    // stands where the background would otherwise be a flat fill.
++    let grid = if app.np_gradient && picture.is_none() { Some(gradient_grid(app.background_art.as_ref(), app.accent_color())) } else { None };
+     egui::Area::new(egui::Id::unique("now-playing"))
+         .order(egui::Order::Middle)
+         .fixed_pos(rect.min)
+@@ -120,7 +123,13 @@ pub fn overlay(app: &mut App, ctx: &egui::Context, now: f64) {
+                 // Full screen wears the page's colour rather than covering it: a flat
+                 // fill here would hide the theme the window is already showing.
+                 let solid = if app.fullscreen { theme::with_alpha(look.solid(), 0.55) } else { look.solid() };
+-                painter.rect_filled(rect, 0.0, solid);
++                if let Some(g) = &grid {
++                    paint_grid(&painter, rect, g, if app.fullscreen { 0.55 } else { 1.0 });
++                } else {
++                    painter.rect_filled(rect, 0.0, solid);
++                }
++            } else if let Some(g) = &grid {
++                paint_grid(&painter, rect, g, if app.fullscreen { 0.55 } else { 1.0 });
+             } else {
+                 // The same in full screen for a preset with no artwork background.
+                 let ground = theme::lerp_color(theme::bg(), app.accent_color(), 0.25);
+@@ -133,6 +142,56 @@ pub fn overlay(app: &mut App, ctx: &egui::Context, now: f64) {
+         });
+ }
+ 
++/// Nine colours for the gradient: the cover's own blurred field sampled on a 3x3 grid
++/// (corners, edges, centre), pushed a little in saturation and kept dark enough for
++/// the white marks. Without a cover the accent stands in, shaded toward the bottom.
++fn gradient_grid(art: Option<&crate::art::Art>, accent: Color32) -> [Color32; 9] {
++    let n = crate::art::SIZE as usize;
++    let mut out = [Color32::BLACK; 9];
++    for (i, o) in out.iter_mut().enumerate() {
++        let (gx, gy) = (i % 3, i / 3);
++        let base = match art.filter(|a| a.rgba.len() >= n * n * 4) {
++            Some(a) => {
++                // A 12x12 box around the grid point (edges pulled in so it stays inside).
++                let cx = [8usize, n / 2, n - 9][gx];
++                let cy = [8usize, n / 2, n - 9][gy];
++                let (mut r, mut g, mut bl, mut cnt) = (0u32, 0u32, 0u32, 0u32);
++                for y in cy - 6..cy + 6 {
++                    for x in cx - 6..cx + 6 {
++                        let p = (y * n + x) * 4;
++                        r += a.rgba[p] as u32;
++                        g += a.rgba[p + 1] as u32;
++                        bl += a.rgba[p + 2] as u32;
++                        cnt += 1;
++                    }
++                }
++                Color32::from_rgb((r / cnt) as u8, (g / cnt) as u8, (bl / cnt) as u8)
++            }
++            None => theme::lerp_color(accent, Color32::BLACK, 0.25 * gy as f32 + 0.1 * gx as f32),
++        };
++        let luma = 0.299 * base.r() as f32 + 0.587 * base.g() as f32 + 0.114 * base.b() as f32;
++        let sat = |c: u8| (luma + (c as f32 - luma) * 1.3).clamp(0.0, 255.0) * 0.82;
++        *o = Color32::from_rgb(sat(base.r()) as u8, sat(base.g()) as u8, sat(base.b()) as u8);
++    }
++    out
++}
++
++/// The 3x3 colours laid over `rect` as eight triangles, blending between neighbours.
++fn paint_grid(painter: &egui::Painter, rect: Rect, cols: &[Color32; 9], alpha: f32) {
++    let mut mesh = egui::Mesh::default();
++    for (i, c) in cols.iter().enumerate() {
++        let (gx, gy) = ((i % 3) as f32 / 2.0, (i / 3) as f32 / 2.0);
++        let c = if alpha < 1.0 { theme::with_alpha(*c, alpha) } else { *c };
++        mesh.colored_vertex(pos2(rect.left() + rect.width() * gx, rect.top() + rect.height() * gy), c);
++    }
++    for (x, y) in [(0u32, 0u32), (1, 0), (0, 1), (1, 1)] {
++        let a = y * 3 + x;
++        mesh.add_triangle(a, a + 1, a + 3);
++        mesh.add_triangle(a + 1, a + 4, a + 3);
++    }
++    painter.add(egui::Shape::mesh(mesh));
++}
++
+ /// The video's picture, kept with the song: YouTube Music is asked for its video, the answer is
+ /// taken up, and the clip starts where the music already is and is held there. This runs
+ /// every frame the player is up, whether or not the picture has arrived yet: a whole clip
+@@ -296,10 +355,22 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      let lift = 20.0 - f32::from(super::titlebar::top_margin(20, 44.0));
      let header = Rect::from_min_size(area.min - vec2(0.0, if app.fullscreen { 0.0 } else { lift }), vec2(area.width(), 44.0));
      let mut hui = ui.new_child(egui::UiBuilder::new().max_rect(header).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -4000,7 +4086,7 @@ index 28fc376..c9bb6fd 100644
      let close = cap_slot(&mut hui, left, 0, "close", "Close now playing");
      let ch = theme::anim_bool(ui.ctx(), close.id.with("h"), close.hovered(), 0.12);
      glyphs::draw(&hui, close.rect.center(), 16.0, glyphs::CLOSE, theme::lerp_color(theme::text_dim(), theme::text(), ch));
-@@ -316,13 +328,13 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -316,13 +387,13 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
          app.actions.push(Action::Mini(true));
      }
      let mut edge = vedge - super::titlebar::right_gap(ui.ctx(), ui.max_rect(), 0.0);
@@ -4016,7 +4102,7 @@ index 28fc376..c9bb6fd 100644
      edge = sing.left() - 10.0;
      // The song's actions stand in up here only when the cover column is hidden — a
      // narrow window showing the panel alone; otherwise they live under the sleeve.
-@@ -344,7 +356,7 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -344,7 +415,7 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      let slide = 72.0;
      let right = if lyrics_only {
          // No cover column next to the panel: the artwork fades in from the left as the panel leaves.
@@ -4025,7 +4111,7 @@ index 28fc376..c9bb6fd 100644
          let px = (side * ppp) as u32;
          if art_vis > 0.001 {
              let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(content));
-@@ -368,9 +380,9 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -368,9 +439,9 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
              Rect::from_min_size(content.min, vec2(col_w, content.height()))
          };
          let (col, side) = if video {
@@ -4037,7 +4123,7 @@ index 28fc376..c9bb6fd 100644
          };
          // One image size for the whole glide: the sleeve keeps its size when the panel
          // comes and goes, so it is measured from the narrower of the two columns.
-@@ -458,26 +470,56 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -458,26 +529,56 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      }
  
      // Bottom right: ONE seamless capsule carrying the lyrics and the queue, as the
@@ -4103,7 +4189,7 @@ index 28fc376..c9bb6fd 100644
          }
      };
      let r = corner(ui, 0, "lyrics", "Lyrics");
-@@ -500,11 +542,25 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -500,11 +601,25 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      if r.clicked() {
          app.np_tab = if on { NpTab::Art } else { NpTab::UpNext };
      }
@@ -4130,7 +4216,7 @@ index 28fc376..c9bb6fd 100644
  }
  
  /// One of a header capsule's two equal cells.
-@@ -527,7 +583,7 @@ fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
+@@ -527,7 +642,7 @@ fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
  
  /// Apple's Sing mark toggles full vocal reduction from the player header. Drawn rather
  /// than carried as an asset — the icon set has no mic-with-sparkles glyph.
@@ -4139,7 +4225,7 @@ index 28fc376..c9bb6fd 100644
      let ctx = ui.ctx();
      let c = rect.center();
      let disc = named(ui.interact(rect, ui.scope_id().with("np-sing"), Sense::click()), "Sing")
-@@ -536,12 +592,15 @@ fn sing_button(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -536,12 +651,15 @@ fn sing_button(app: &mut App, ui: &mut Ui, rect: Rect) {
      let h = theme::anim_bool(ctx, disc.id.with("h"), disc.hovered(), 0.15);
      // Idle wears the frosted disc the player's other chrome uses; engaged is the lit
      // one the corner toggles take.
@@ -4157,7 +4243,7 @@ index 28fc376..c9bb6fd 100644
      if disc.clicked() {
          app.sing = !app.sing;
          app.sing_level = 1.0;
-@@ -588,10 +647,7 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -588,10 +706,7 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
      let resp = named(ui.interact(track.expand(8.0), ui.scope_id().with("np-vol"), Sense::click_and_drag()), "Volume").on_hover_cursor(egui::CursorIcon::PointingHand);
      let h = theme::anim_bool(ctx, resp.id.with("h"), resp.hovered() || resp.dragged(), 0.15);
      ui.painter().rect_filled(track, 2.0, Color32::from_white_alpha(58));
@@ -4169,7 +4255,7 @@ index 28fc376..c9bb6fd 100644
      if let Some(p) = resp.interact_pointer_pos()
          && (resp.dragged() || resp.clicked())
      {
-@@ -613,6 +669,40 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -613,6 +728,40 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
      }
  }
  
@@ -4210,7 +4296,7 @@ index 28fc376..c9bb6fd 100644
  /// An engaged transport mark: the bare glyph, inked in the accent. Nothing sits behind it —
  /// off it is tertiary white, on it is themed, and the change is the whole announcement.
  pub(super) fn lit_mark(app: &App, on: f32, off: Color32) -> Color32 {
-@@ -635,8 +725,10 @@ fn split_explicit(title: &str) -> (String, bool) {
+@@ -635,8 +784,10 @@ fn split_explicit(title: &str) -> (String, bool) {
  
  /// Size of the artwork laid out in `col`: what is left once the sleeve's information,
  /// its bar and the transport underneath it have taken their room.
@@ -4223,18 +4309,18 @@ index 28fc376..c9bb6fd 100644
  }
  
  /// The sleeve: art, title and artists, the seek line with its two times, then the
-@@ -716,7 +808,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -716,7 +867,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let heard = if hold.is_some() { track.clone() } else { app.playing_track().cloned().unwrap_or_else(|| track.clone()) };
      let look = app.look();
      let cs = &look.cover;
 -    let art = Rect::from_center_size(pos2(col.center().x, col.top() + side / 2.0 + (col.height() - side - 250.0).max(0.0) * 0.42), Vec2::splat(side));
 +    let old = app.old_player;
 +    let reserve = if old { 250.0 } else { 360.0 };
-+    let art = Rect::from_center_size(pos2(col.center().x, col.top() + side / 2.0 + (col.height() - side - reserve).max(0.0) * 0.42), Vec2::splat(side));
++    let art = Rect::from_center_size(pos2(col.center().x, col.top() + side / 2.0 + (col.height() - side - reserve).max(0.0) * if old { 0.42 } else { 0.62 } + if old { 0.0 } else { 14.0 }), Vec2::splat(side));
      let round = cs.shape != Shape::Rounded;
      let radius = if round { side / 2.0 } else { cs.radius.clamp(0.0, side / 2.0) };
      // Apple draws the sleeve smaller while the song is held: the layout stays put, only the
-@@ -743,7 +837,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -743,7 +896,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.best_part_heard = true;
      }
      let ahead = app.show_best_part && offer.is_some_and(|ms| heard_ms < ms as f64 - 400.0);
@@ -4243,7 +4329,7 @@ index 28fc376..c9bb6fd 100644
      // Spotify's canvas is parked for now: no lookup, no decoder, no picture. Everything
      // under it (the state, the backend ask, the loop, the cache) stays ready to switch
      // back on.
-@@ -803,6 +897,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -803,6 +956,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
                  if cs.brightness < 0.99 {
                      ui.painter().rect_filled(draw, draw_cr, theme::shade(1.0 - cs.brightness));
                  }
@@ -4254,7 +4340,7 @@ index 28fc376..c9bb6fd 100644
              }
          }
          // A handoff still shows the outgoing song; the stats are the incoming one's.
-@@ -815,11 +913,25 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -815,11 +972,25 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let x0 = art.left();
      let info_y = art.bottom() + 22.0;
      // The Best Part disc, the star and the ⋯ menu share the information line's right end.
@@ -4282,7 +4368,7 @@ index 28fc376..c9bb6fd 100644
      // The name is the way into the song's own sheet — the ⋯ menu no longer carries it.
      let about = ui.interact(tr.expand2(vec2(0.0, 3.0)), ui.scope_id().with("np-about"), Sense::click());
      let about = named(about, "About song").on_hover_cursor(egui::CursorIcon::PointingHand);
-@@ -841,7 +953,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -841,7 +1012,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          line = format!("{line} — {}", album.name);
      }
      let line_w = text_w;
@@ -4292,7 +4378,7 @@ index 28fc376..c9bb6fd 100644
      // The album after the em dash opens its page too, underlined like the artists.
      if let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty())
          && let Some(id) = album.id.clone()
-@@ -865,13 +978,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -865,13 +1037,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              }
          }
      }
@@ -4312,7 +4398,7 @@ index 28fc376..c9bb6fd 100644
          let bresp = ui.interact(disc_r, ui.scope_id().with("np-best-part"), Sense::click());
          let bresp = named(bresp, "Best Part").on_hover_text("Skip to the part of the song people replay most").on_hover_cursor(egui::CursorIcon::PointingHand);
          let bh = theme::anim_bool(ui.ctx(), bresp.id.with("h"), bresp.hovered(), 0.1) * bp;
-@@ -886,7 +1004,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -886,7 +1063,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // The star: a 30 px disc that washes under the pointer and fills in the accent
      // once liked. The ⋯ menu sits at the line's end, as on music.youtube.com.
      let liked = app.liked.contains(&heard.id);
@@ -4321,7 +4407,7 @@ index 28fc376..c9bb6fd 100644
      let sr = ui.interact(star, ui.scope_id().with(("np-like", &heard.id)), Sense::click());
      let sr = named(sr, if liked { "Remove from favourites" } else { "Add to favourites" }).on_hover_cursor(egui::CursorIcon::PointingHand);
      let sh = theme::anim_bool(ui.ctx(), sr.id.with("h"), sr.hovered(), 0.1);
-@@ -905,11 +1023,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -905,11 +1082,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          // The other half of the star: a right click tells YouTube the song isn't wanted.
          app.actions.push(Action::Dislike(heard.clone()));
      } else if sr.clicked() {
@@ -4339,7 +4425,7 @@ index 28fc376..c9bb6fd 100644
  
      // Seek: a 4 px line that grows under the pointer, its times below.
      let status = app.audio.status.clone();
-@@ -944,49 +1067,63 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -944,49 +1126,63 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // Transport first, because its measures set the step under the times line: the row is
      // spread over the sleeve's own width — the outer pair a hair inside its edges, the
      // skips a little under a quarter of the side out from the play button.
@@ -4416,7 +4502,7 @@ index 28fc376..c9bb6fd 100644
      }
      // While the two songs blend, its name sits there instead.
      let mixed = theme::anim_bool(ui.ctx(), "np-automix-on", app.mixing(), 0.3);
-@@ -1009,7 +1146,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1009,7 +1205,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
  
      // Transport: the reference's row — shuffle, previous, play, next, repeat, spread over
      // the sleeve's own width.
@@ -4425,7 +4511,7 @@ index 28fc376..c9bb6fd 100644
      // The marks are primary white, an off shuffle or repeat tertiary; a pressed button
      // shrinks to 90%, as the reference's does.
      let ink = |h: f32, base: f32, on: f32| theme::with_alpha(theme::lerp_color(theme::with_alpha(Color32::WHITE, base), Color32::WHITE, h), on);
-@@ -1023,26 +1160,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1023,26 +1219,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -4457,7 +4543,7 @@ index 28fc376..c9bb6fd 100644
      let mark = ink(h, 1.0, dim);
      let morph = theme::anim_bool(ui.ctx(), "np-play-morph", app.playing() || app.buffering, 0.18);
      if app.buffering {
-@@ -1064,7 +1201,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1064,7 +1260,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.toggle();
      }
      let (r, h, p) = btn(ui, 3, "next", "Next", enabled);
@@ -4466,7 +4552,7 @@ index 28fc376..c9bb6fd 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1076,8 +1213,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1076,8 +1272,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let looping = app.queue.repeat != Repeat::Off;
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
@@ -4477,7 +4563,7 @@ index 28fc376..c9bb6fd 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1085,6 +1222,11 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1085,6 +1281,11 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              Repeat::One => Repeat::Off,
          };
      }
@@ -4489,7 +4575,7 @@ index 28fc376..c9bb6fd 100644
  }
  
  /// The Best Part mark: the music note the button has always carried, with the skip mark
-@@ -1267,7 +1409,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+@@ -1267,7 +1468,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
  fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
      let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
      let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
@@ -4498,7 +4584,7 @@ index 28fc376..c9bb6fd 100644
          ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
          ui.add_space(14.0);
          let style = &app.look().lyrics;
-@@ -1317,7 +1459,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1317,7 +1518,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
          let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
          let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
          ui.set_max_height(max_height);
@@ -4508,7 +4594,7 @@ index 28fc376..c9bb6fd 100644
              if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
                  // First in the menu, so unfolding it only ever adds rows below the ⋯:
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7..af023ae 100644
+index 899a3c7..1270252 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
 @@ -65,18 +65,28 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
@@ -4949,12 +5035,16 @@ index 899a3c7..af023ae 100644
                      ui.add_space(4.0);
                      for (code, name) in super::lyric_prefs::LANGUAGES {
                          let on = app.lyric_prefs.target == *code;
-@@ -3418,6 +3696,14 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
+@@ -3418,6 +3696,18 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.page_blobs, "Blobs on pages");
          });
          divider(ui);
 +        setting_row(ui, "Home background follows the cover", Some("A gradient of the carousel's cover colour behind Home. Off keeps it black."), |ui| {
 +            toggle(ui, &mut app.home_tint, "Home background follows the cover");
++        });
++        divider(ui);
++        setting_row(ui, "Gradient player background", Some("Now Playing's flat background becomes a soft gradient of several colours taken from the cover. Off keeps it flat."), |ui| {
++            toggle(ui, &mut app.np_gradient, "Gradient player background");
 +        });
 +        divider(ui);
 +        setting_row(ui, "Old maximize player", Some("Brings back the earlier Now Playing: glass buttons, cover reflection, left-aligned title, volume at the top right. Off is the minimal layout."), |ui| {
@@ -4964,7 +5054,7 @@ index 899a3c7..af023ae 100644
          setting_row(ui, "Colour icons to the song", Some("The marks — play, shuffle, repeat, the progress bar — take the sleeve's colour. Off keeps the app's own."), |ui| {
              toggle(ui, &mut app.icon_tint, "Colour icons to the song");
          });
-@@ -3491,6 +3777,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3491,6 +3781,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.anim_bg, "Animated background");
          });
          divider(ui);
@@ -4979,7 +5069,7 @@ index 899a3c7..af023ae 100644
          setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
              toggle(ui, &mut app.reactive_bg, "Pulse with the music");
          });
-@@ -3499,7 +3793,6 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3499,7 +3797,6 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.show_nerd_stats, "Stats for nerds");
          });
      });
@@ -4987,7 +5077,7 @@ index 899a3c7..af023ae 100644
  }
  
  /// Settings › Window.
-@@ -3511,10 +3804,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
+@@ -3511,10 +3808,6 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.close_to_tray, "Close to tray");
          });
          divider(ui);
@@ -4998,7 +5088,7 @@ index 899a3c7..af023ae 100644
          let api = crate::renderer::api_name();
          let title = format!("Draw with {api}");
          let desc = format!(
-@@ -3593,8 +3882,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3593,8 +3886,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
                      });
                  });
                  divider(ui);
@@ -5009,7 +5099,7 @@ index 899a3c7..af023ae 100644
                  });
              }
          });
-@@ -3609,7 +3898,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3609,7 +3902,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
          let busy = app.lastfm_busy.load(Ordering::Relaxed);
          let desc = match &app.lastfm_user {
              Some(name) => format!("Scrobbling what you play to {name}'s profile."),
@@ -5018,7 +5108,7 @@ index 899a3c7..af023ae 100644
              None => "Scrobble what you play to your Last.fm profile.".to_owned(),
          };
          let (mut connect, mut disconnect) = (false, false);
-@@ -3722,7 +4011,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3722,7 +4015,7 @@ fn network(app: &mut App, ui: &mut Ui) {
      use crate::proxy::{self, Setting};
      let same = |a: &Setting, b: &Setting| std::mem::discriminant(a) == std::mem::discriminant(b);
      let mut pick = None;
@@ -5027,7 +5117,7 @@ index 899a3c7..af023ae 100644
          let btn = dropdown_button(ui, app.proxy_mode.label(), 220.0, "Proxy");
          egui::Popup::menu(&btn).show(|ui| {
              ui.set_width(220.0);
-@@ -3754,7 +4043,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3754,7 +4047,7 @@ fn network(app: &mut App, ui: &mut Ui) {
              divider(ui);
              let desc = match proxy::system() {
                  Some(p) => format!("Windows is set to use {}.", proxy::redact(&p)),
@@ -5036,7 +5126,7 @@ index 899a3c7..af023ae 100644
              };
              setting_row(ui, "Windows proxy", Some(&desc), |_| {});
          }
-@@ -3844,7 +4133,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
+@@ -3844,7 +4137,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(220.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -5045,7 +5135,7 @@ index 899a3c7..af023ae 100644
              ui.add_space(4.0);
              let mut row = |ui: &mut Ui, label: &str, value: &str| {
                  let on = current.eq_ignore_ascii_case(value);
-@@ -3907,7 +4196,7 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
+@@ -3907,7 +4200,7 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(340.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -5054,7 +5144,7 @@ index 899a3c7..af023ae 100644
              ui.add_space(4.0);
              if option_row(ui, SYSTEM_DEFAULT, app.output_device.is_none()).clicked() {
                  pick = Some(None);
-@@ -3993,15 +4282,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
+@@ -3993,15 +4286,48 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
      if !s.shown {
          return;
      }
