@@ -1941,7 +1941,7 @@ index b0afd9a..7314d37 100644
                      status.seek_revision.fetch_add(1, Ordering::Release);
                      continue;
 diff --git a/src/backend.rs b/src/backend.rs
-index d672c59..db795c8 100644
+index d672c59..f8a1d8d 100644
 --- a/src/backend.rs
 +++ b/src/backend.rs
 @@ -199,6 +199,76 @@ impl Req {
@@ -2030,7 +2030,7 @@ index d672c59..db795c8 100644
      }
  
      /// The clip YouTube Music holds for a song that is not itself a video: the video
-@@ -1226,18 +1296,28 @@ impl Backend {
+@@ -1226,17 +1296,44 @@ impl Backend {
          {
              return Ok(paired);
          }
@@ -2047,29 +2047,45 @@ index d672c59..db795c8 100644
 +        // Only a video whose title carries the song's title counts: a different song by the
 +        // same artist is no picture for this one, and counts as not found.
 +        let want = crate::apple::norm(&track.title);
-+        let titled = |t: &Track| t.music_video && ours(t) && !want.is_empty() && crate::apple::norm(&t.title).contains(want.as_str());
++        // The song's name without its trailing "(Classic Version)", "[Remastered]" or
++        // " - Single Version": the clip is usually titled by the bare name.
++        let core = {
++            let cut = track.title.find(['(', '[']).or_else(|| track.title.find(" - ")).unwrap_or(track.title.len());
++            crate::apple::norm(&track.title[..cut])
++        };
++        let titled = |t: &Track| {
++            if !(t.music_video && ours(t) && !want.is_empty()) {
++                return false;
+             }
++            let has = crate::apple::norm(&t.title);
++            has.contains(want.as_str()) || (core.len() >= 3 && has.contains(core.as_str()))
++        };
 +        let mut searched = None;
++        let mut seen: Vec<String> = Vec::new();
 +        for query in [format!("{} {}", track.title, track.artist_line()), format!("{} official music video", track.title)] {
 +            match ytm::search_tracks(&*self.api, &query, ytm::Filter::Videos, me).await {
 +                Ok(hits) => {
 +                    searched = Some(());
-+                    if let Some(found) = hits.into_iter().find(|t| titled(t)) {
-+                        return Ok(found);
++                    if let Some(found) = hits.iter().find(|t| titled(t)) {
++                        return Ok(found.clone());
 +                    }
++                    seen.extend(hits.iter().take(5).map(|t| format!("{} / {} (video: {})", t.title, t.artist_line(), t.music_video)));
 +                }
 +                Err(e) => log::info!("music video for '{}': the search for '{query}' failed: {e:#}", track.title),
-             }
-         }
++            }
++        }
 +        // Every search failing is an error to try again on; a search that answered with
 +        // nothing matching is simply a song with no video.
 +        match searched {
-+            Some(()) => Err(anyhow::anyhow!("No music video of {} was found", track.title)),
++            Some(()) => {
++                log::info!("music video for '{}': nothing matched; looked at: {}", track.title, seen.join(" | "));
++                Err(anyhow::anyhow!("No music video of {} was found", track.title))
++            }
 +            None => Err(anyhow::anyhow!("The search for a music video of {} failed", track.title)),
-+        }
+         }
      }
  
-     /// The music-video player's picture for a song: the music video YouTube Music has of it — the
-@@ -1291,11 +1371,64 @@ impl Backend {
+@@ -1291,11 +1388,64 @@ impl Backend {
          if let Some(id) = known {
              return Ok(id);
          }
@@ -2135,7 +2151,7 @@ index d672c59..db795c8 100644
      /// What plays when an Apple tile is asked for as a queue: the songs YouTube Music
      /// has of the release Apple names.
      async fn apple_tracks(&self, kind: model::AppleKind, title: &str, artist: &str, me: bool) -> anyhow::Result<Vec<Track>> {
-@@ -1331,7 +1464,7 @@ impl Backend {
+@@ -1331,7 +1481,7 @@ impl Backend {
          let hits = ytm::search_tracks(&*self.api, &format!("{title} {artist}"), ytm::Filter::Songs, me).await?;
          let named = hits.iter().find(|t| same_name(&t.title, title) && near_artist(artist, &t.artist_line())).cloned();
          let titled = named.or_else(|| hits.iter().find(|t| same_name(&t.title, title)).cloned());
@@ -2144,7 +2160,7 @@ index d672c59..db795c8 100644
      }
  
      /// YouTube Music's id for a release Apple names. Apple's playlists are curated under
-@@ -1346,7 +1479,7 @@ impl Backend {
+@@ -1346,7 +1496,7 @@ impl Backend {
          };
          let named = hits.iter().find(|c| same_name(&c.title, title) && (playlist || near_artist(artist, &c.subtitle))).and_then(pick);
          let titled = named.or_else(|| hits.iter().find(|c| same_name(&c.title, title)).and_then(pick));
@@ -3124,7 +3140,7 @@ index e5eced3..3b8d33c 100644
              .map_err(|e| log::warn!("media controls unavailable: {e:?}"))
              .ok()?;
 diff --git a/src/motion.rs b/src/motion.rs
-index f3ff29b..52d8e46 100644
+index f3ff29b..7b8bcb6 100644
 --- a/src/motion.rs
 +++ b/src/motion.rs
 @@ -6,6 +6,7 @@
@@ -3135,7 +3151,7 @@ index f3ff29b..52d8e46 100644
  use std::path::{Path, PathBuf};
  use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
  use std::sync::{Arc, LazyLock, Mutex, Weak};
-@@ -29,11 +30,15 @@ pub struct Motion {
+@@ -29,11 +30,25 @@ pub struct Motion {
      /// Set once the thread that fetches and decodes the clip has had its whole try: a
      /// picture that never gave a frame is not still on its way.
      done: Arc<AtomicBool>,
@@ -3143,16 +3159,26 @@ index f3ff29b..52d8e46 100644
 +    /// size isn't known): the player says how far along the wait is.
 +    got: AtomicU64,
 +    total: AtomicU64,
++    /// Where the song is now, as a point in the clip, in 100 ns units. The music-video
++    /// player keeps it current; the decoder's first catch-up runs on to it rather than to
++    /// the place the song was when the clip was asked for, so a slow start doesn't leave
++    /// the picture behind. `u64::MAX` when nothing follows a song (sleeves, canvases).
++    song: AtomicU64,
  }
  
  impl Motion {
      fn new(url: &str) -> Self {
 -        Self { url: url.to_owned(), latest: Mutex::new(None), version: AtomicU64::new(0), at: AtomicU64::new(0), stop: Arc::new(AtomicBool::new(false)), pause: Arc::new(AtomicBool::new(false)), done: Arc::new(AtomicBool::new(false)) }
-+        Self { url: url.to_owned(), latest: Mutex::new(None), version: AtomicU64::new(0), at: AtomicU64::new(0), stop: Arc::new(AtomicBool::new(false)), pause: Arc::new(AtomicBool::new(false)), done: Arc::new(AtomicBool::new(false)), got: AtomicU64::new(0), total: AtomicU64::new(0) }
++        Self { url: url.to_owned(), latest: Mutex::new(None), version: AtomicU64::new(0), at: AtomicU64::new(0), stop: Arc::new(AtomicBool::new(false)), pause: Arc::new(AtomicBool::new(false)), done: Arc::new(AtomicBool::new(false)), got: AtomicU64::new(0), total: AtomicU64::new(0), song: AtomicU64::new(u64::MAX) }
++    }
++
++    /// Tell the decoder where the song is in the clip right now.
++    pub fn set_song(&self, at: Duration) {
++        self.song.store((at.as_nanos() / 100) as u64, Ordering::Relaxed);
      }
  
      /// Freeze the decoder between frames: the picture holds where it is and picks up there.
-@@ -68,6 +73,16 @@ impl Motion {
+@@ -68,6 +83,16 @@ impl Motion {
          self.done.load(Ordering::Relaxed)
      }
  
@@ -3169,7 +3195,12 @@ index f3ff29b..52d8e46 100644
      /// Puts a frame on screen and hands back the one it displaced: two frames later the
      /// decoder fills that buffer again, which is cheaper than a fresh allocation and a
      /// zeroing of eight megabytes every frame.
-@@ -129,12 +144,30 @@ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, m
+@@ -125,16 +150,35 @@ fn run(motion: Arc<Motion>, ctx: egui::Context, master: String, max_width: u32)
+ /// `start_at` runs the clip on from where the song already is.
+ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, max_width: u32, start_at: Duration) -> Arc<Motion> {
+     let motion = Arc::new(Motion::new(if url.is_empty() { hls.unwrap_or(url) } else { url }));
++    motion.set_song(start_at);
+     let (this, ctx, id, url, hls, at) = (motion.clone(), ctx.clone(), id.to_owned(), url.to_owned(), hls.map(str::to_owned), start_at);
      let _ = std::thread::Builder::new().name("video".into()).spawn(move || {
          let done = this.done.clone();
          let run = move || {
@@ -3205,7 +3236,7 @@ index f3ff29b..52d8e46 100644
                      Some(path) => {
                          decode(&this, &path.to_string_lossy(), &ctx, max_width, at);
                          if this.stop.load(Ordering::Relaxed) || this.latest().is_some() {
-@@ -151,6 +184,8 @@ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, m
+@@ -151,6 +195,8 @@ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, m
                  }
                  return;
              };
@@ -3214,7 +3245,7 @@ index f3ff29b..52d8e46 100644
              if let Some(path) = save_hls(&id, master, max_width) {
                  decode(&this, &path.to_string_lossy(), &ctx, max_width, at);
              }
-@@ -161,6 +196,260 @@ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, m
+@@ -161,6 +207,272 @@ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, m
      motion
  }
  
@@ -3238,6 +3269,10 @@ index f3ff29b..52d8e46 100644
 +    url: String,
 +    total: u64,
 +    head: Vec<u8>,
++    /// One runtime for every connection the decoder opens: the pieces come down through a
++    /// single pool of upstream connections, and the next piece is fetched while the last
++    /// one is still being written.
++    rt: tokio::runtime::Runtime,
 +}
 +
 +/// Starts a loopback server for the clip at `url` and hands back the address to decode
@@ -3246,9 +3281,8 @@ index f3ff29b..52d8e46 100644
 +/// server instead, and the server asks YouTube as the app's client, a piece at a time.
 +/// Nothing is kept on disk. `None` when the first piece won't come: the caller falls back.
 +fn relay(motion: &Arc<Motion>, url: &str) -> Option<(String, Arc<AtomicBool>)> {
-+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
++    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().ok()?;
 +    let (total, mut head) = rt.block_on(probe(url))?;
-+    drop(rt);
 +    // Zero the delay of the edit list in the header, as `zero_the_edit_list` does for a file.
 +    let mut times = Vec::new();
 +    edit_times(&head, 0, head.len(), &mut times);
@@ -3260,7 +3294,7 @@ index f3ff29b..52d8e46 100644
 +    let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
 +    let port = listener.local_addr().ok()?.port();
 +    let close = Arc::new(AtomicBool::new(false));
-+    let clip = Arc::new(Clip { url: url.to_owned(), total, head });
++    let clip = Arc::new(Clip { url: url.to_owned(), total, head, rt });
 +    {
 +        let (clip, stop, close) = (clip.clone(), motion.stop.clone(), close.clone());
 +        std::thread::Builder::new().name("video-relay".into()).spawn(move || accept(listener, clip, stop, close)).ok()?;
@@ -3392,7 +3426,6 @@ index f3ff29b..52d8e46 100644
 +    let _ = sock.set_read_timeout(Some(Duration::from_secs(30)));
 +    let Ok(mut out) = sock.try_clone() else { return };
 +    let mut input = BufReader::new(sock);
-+    let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else { return };
 +    loop {
 +        let mut line = String::new();
 +        if input.read_line(&mut line).unwrap_or(0) == 0 {
@@ -3458,12 +3491,22 @@ index f3ff29b..52d8e46 100644
 +            }
 +            pos = upto;
 +        }
++        let fetch = |from: u64, to: u64| {
++            let url = clip.url.clone();
++            clip.rt.spawn(async move { piece(&url, from, to).await })
++        };
++        let mut ahead: Option<tokio::task::JoinHandle<Option<Vec<u8>>>> = None;
 +        while pos <= end {
 +            if stop.load(Ordering::Relaxed) || close.load(Ordering::Relaxed) {
 +                return;
 +            }
 +            let to = end.min(pos + PIECE - 1);
-+            let Some(bytes) = rt.block_on(piece(&clip.url, pos, to)) else { return };
++            let this = ahead.take().unwrap_or_else(|| fetch(pos, to));
++            // The next piece is already on its way while this one is written out.
++            if to < end {
++                ahead = Some(fetch(to + 1, end.min(to + PIECE)));
++            }
++            let Some(bytes) = clip.rt.block_on(this).ok().flatten() else { return };
 +            if out.write_all(&bytes).is_err() {
 +                return;
 +            }
@@ -3475,7 +3518,7 @@ index f3ff29b..52d8e46 100644
  /// Spotify's canvas: a short clip with no sound of its own, played over the sleeve and
  /// looping until the song changes. Its file is cached under the name Spotify gave it,
  /// which is no YouTube id, so it goes to a cache of its own.
-@@ -299,7 +588,7 @@ fn video_name(id: &str) -> Option<String> {
+@@ -299,7 +611,7 @@ fn video_name(id: &str) -> Option<String> {
  }
  
  /// Write the stream out, or find the copy an earlier watch left behind.
@@ -3484,7 +3527,7 @@ index f3ff29b..52d8e46 100644
      let name = video_name(id)?;
      let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
      rt.block_on(async {
-@@ -315,7 +604,10 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
+@@ -315,7 +627,10 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
              let mut resp = match crate::proxy::http()
                  .get(url)
                  .header("User-Agent", crate::innertube::UA)
@@ -3496,7 +3539,7 @@ index f3ff29b..52d8e46 100644
                  .send()
                  .await
              {
-@@ -332,6 +624,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
+@@ -332,6 +647,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
                  }
              };
              let mut total = 0u64;
@@ -3504,7 +3547,7 @@ index f3ff29b..52d8e46 100644
              loop {
                  match resp.chunk().await {
                      Ok(Some(chunk)) => {
-@@ -340,6 +633,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
+@@ -340,6 +656,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
                              break None;
                          }
                          total += chunk.len() as u64;
@@ -3512,7 +3555,57 @@ index f3ff29b..52d8e46 100644
                      }
                      Ok(None) => break Some(()),
                      Err(e) => {
-@@ -643,7 +937,10 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
+@@ -548,8 +865,8 @@ fn decode(motion: &Arc<Motion>, src: &str, ctx: &egui::Context, max_width: u32,
+         // Each pass plays the clip once; then it starts again from the top. The song,
+         // though, only starts at `at` once.
+         let mut at = at;
+-        for _ in 0..100 {
+-            if motion.stop.load(Ordering::Relaxed) || !play_once(motion, ctx, url, max_width, std::mem::take(&mut at)) {
++        for pass in 0..100 {
++            if motion.stop.load(Ordering::Relaxed) || !play_once(motion, ctx, url, max_width, std::mem::take(&mut at), pass == 0) {
+                 break;
+             }
+         }
+@@ -559,7 +876,7 @@ fn decode(motion: &Arc<Motion>, src: &str, ctx: &egui::Context, max_width: u32,
+ }
+ 
+ #[cfg(windows)]
+-unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PCWSTR, max_width: u32, at: Duration) -> bool {
++unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PCWSTR, max_width: u32, at: Duration, first_pass: bool) -> bool {
+     use windows::Win32::Media::MediaFoundation::*;
+     let played = unsafe {
+         (|| -> windows::core::Result<bool> {
+@@ -607,11 +924,17 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
+         // keyframe at or before the mark, and the frames between it and the mark are
+         // decoded and dropped: a handful of them, rather than the clip's whole first half,
+         // which is what made a video taken up mid-song stutter, fall behind and give up.
+-        let skip = at.as_secs_f64() * 1e7;
++        let mut skip = at.as_secs_f64() * 1e7;
++        // A clip that follows a song (the music video) runs on to where the song is NOW:
++        // opening a stream can take ten seconds, and the song has not waited for it.
++        let follows = first_pass && motion.song.load(Ordering::Relaxed) != u64::MAX;
++        let now_song = |skip: f64| if follows { skip.max(motion.song.load(Ordering::Relaxed) as f64) } else { skip };
++        skip = now_song(skip);
+         if skip > 0.0 {
+             // A reader that took the seek has a keyframe's worth left to drop; one that
+             // refused is run through to the mark the slow way, as it always was.
+             let mut left = if seek(&reader, stream, skip) { 600 } else { i64::MAX };
++            let began = Instant::now();
+             loop {
+                 if motion.stop.load(Ordering::Relaxed) {
+                     return Ok(false);
+@@ -622,7 +945,9 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
+                 if flags & MF_SOURCE_READERF_ERROR.0 as u32 != 0 {
+                     return Ok(false);
+                 }
+-                if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 || ts as f64 >= skip {
++                // The mark moves with the song while the catch-up runs; a catch-up that
++                // can't outrun it in 15 s gives the picture as it is.
++                if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 || ts as f64 >= now_song(skip) || began.elapsed() > Duration::from_secs(15) {
+                     break;
+                 }
+                 left -= 1;
+@@ -643,7 +968,10 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
              }
              // Paused with the song: no sample is taken until it moves again, and the clock
              // the frames are paced by gives the waiting back, so the picture holds its place.
@@ -3524,7 +3617,7 @@ index f3ff29b..52d8e46 100644
                  let waited = Instant::now();
                  while motion.pause.load(Ordering::Relaxed) && !motion.stop.load(Ordering::Relaxed) {
                      std::thread::sleep(Duration::from_millis(50));
-@@ -1176,3 +1473,18 @@ mod tests {
+@@ -1176,3 +1504,18 @@ mod tests {
          }
      }
  }
@@ -5842,7 +5935,7 @@ index 249fb6f..adb0eef 100644
      }
  
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..cdf6032 100644
+index 252e6b9..1ef202a 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,10 @@ mod backdrop;
@@ -5885,6 +5978,24 @@ index 252e6b9..cdf6032 100644
  }
  
  fn removal_items(c: &crate::backend::Collection, rows: impl IntoIterator<Item = usize>) -> Vec<(String, String)> {
+@@ -594,7 +605,7 @@ impl Video {
+     /// place. `clip` and `song` are how far each has got, and `anchor` is the point in
+     /// the song the clip was started at: until the clip runs past it, it is still inside
+     /// the download and the skip, so the two aren't compared. A paused song holds the
+-    /// picture, so it can't be out of step either. Past a second and a half apart the
++    /// picture, so it can't be out of step either. Past four seconds apart the
+     /// clip is restarted, and three restarts is as far as that is chased — a video
+     /// shorter than its song, or one with a lead-in of its own, would otherwise blink.
+     /// `dead` is a clip whose thread has finished without ever giving a frame: it isn't
+@@ -603,7 +614,7 @@ impl Video {
+         if !running {
+             return Step::Start;
+         }
+-        if !playing || (!dead && (clip <= self.anchor || (clip.as_secs_f64() - song.as_secs_f64()).abs() < 1.5)) {
++        if !playing || (!dead && (clip <= self.anchor || (clip.as_secs_f64() - song.as_secs_f64()).abs() < 4.0)) {
+             return Step::Stay;
+         }
+         if self.anchors >= 3 {
 @@ -635,6 +646,11 @@ impl Video {
          Some(widgets::MotionSprite { id: tex.id(), size: tex.size_vec2() })
      }
@@ -6709,7 +6820,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..a1f989d 100644
+index 28fc376..58a223e 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -53,6 +53,9 @@ pub(super) fn lyrics_shown(app: &App, ctx: &egui::Context) -> bool {
@@ -6859,7 +6970,17 @@ index 28fc376..a1f989d 100644
  /// The video's picture, kept with the song: YouTube Music is asked for its video, the answer is
  /// taken up, and the clip starts where the music already is and is held there. This runs
  /// every frame the player is up, whether or not the picture has arrived yet: a whole clip
-@@ -296,10 +396,22 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -174,6 +274,9 @@ fn picture(app: &mut App, ctx: &egui::Context, rect: Rect) {
+     // compared on.
+     if let Some(view) = app.video.view.as_ref() {
+         view.motion.set_pause(!playing);
++        // Where the song is in the clip now: a decoder still opening the stream catches up
++        // to this, not to where the song was when the clip was asked for.
++        view.motion.set_song(clip_at);
+     }
+     let clip = app.video.view.as_ref().map_or(Duration::ZERO, |v| v.motion.position());
+     let dead = app.video.view.as_ref().is_some_and(|v| v.motion.done() && v.motion.latest().is_none());
+@@ -296,10 +399,22 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      let lift = 20.0 - f32::from(super::titlebar::top_margin(20, 44.0));
      let header = Rect::from_min_size(area.min - vec2(0.0, if app.fullscreen { 0.0 } else { lift }), vec2(area.width(), 44.0));
      let mut hui = ui.new_child(egui::UiBuilder::new().max_rect(header).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -6883,7 +7004,7 @@ index 28fc376..a1f989d 100644
      let close = cap_slot(&mut hui, left, 0, "close", "Close now playing");
      let ch = theme::anim_bool(ui.ctx(), close.id.with("h"), close.hovered(), 0.12);
      glyphs::draw(&hui, close.rect.center(), 16.0, glyphs::CLOSE, theme::lerp_color(theme::text_dim(), theme::text(), ch));
-@@ -316,14 +428,48 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -316,14 +431,48 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
          app.actions.push(Action::Mini(true));
      }
      let mut edge = vedge - super::titlebar::right_gap(ui.ctx(), ui.max_rect(), 0.0);
@@ -6934,7 +7055,7 @@ index 28fc376..a1f989d 100644
      // The song's actions stand in up here only when the cover column is hidden — a
      // narrow window showing the panel alone; otherwise they live under the sleeve.
      let cover_hidden = !video && (narrow || cs.layout == Layout::LyricsOnly) && shown_tab != NpTab::Art;
-@@ -344,7 +490,7 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -344,7 +493,7 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      let slide = 72.0;
      let right = if lyrics_only {
          // No cover column next to the panel: the artwork fades in from the left as the panel leaves.
@@ -6943,7 +7064,7 @@ index 28fc376..a1f989d 100644
          let px = (side * ppp) as u32;
          if art_vis > 0.001 {
              let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(content));
-@@ -368,9 +514,9 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -368,9 +517,9 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
              Rect::from_min_size(content.min, vec2(col_w, content.height()))
          };
          let (col, side) = if video {
@@ -6955,7 +7076,7 @@ index 28fc376..a1f989d 100644
          };
          // One image size for the whole glide: the sleeve keeps its size when the panel
          // comes and goes, so it is measured from the narrower of the two columns.
-@@ -446,38 +592,60 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -446,38 +595,60 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
          }
      }
  
@@ -7035,7 +7156,7 @@ index 28fc376..a1f989d 100644
          }
      };
      let r = corner(ui, 0, "lyrics", "Lyrics");
-@@ -500,11 +668,25 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
+@@ -500,11 +671,25 @@ fn body(app: &mut App, ui: &mut Ui, now: f64, video: bool) {
      if r.clicked() {
          app.np_tab = if on { NpTab::Art } else { NpTab::UpNext };
      }
@@ -7062,7 +7183,7 @@ index 28fc376..a1f989d 100644
  }
  
  /// One of a header capsule's two equal cells.
-@@ -515,6 +697,140 @@ fn cap_slot(ui: &mut Ui, cap: Rect, i: usize, key: &str, name: &str) -> egui::Re
+@@ -515,6 +700,140 @@ fn cap_slot(ui: &mut Ui, cap: Rect, i: usize, key: &str, name: &str) -> egui::Re
      named(resp, name).on_hover_text(name).on_hover_cursor(egui::CursorIcon::PointingHand)
  }
  
@@ -7203,7 +7324,7 @@ index 28fc376..a1f989d 100644
  /// Apple's picture-in-picture mark: a centered screen with a smaller inset at its lower
  /// right. Drawn rather than carried as an asset — the icon font has no PiP glyph.
  fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
-@@ -527,7 +843,7 @@ fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
+@@ -527,7 +846,7 @@ fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
  
  /// Apple's Sing mark toggles full vocal reduction from the player header. Drawn rather
  /// than carried as an asset — the icon set has no mic-with-sparkles glyph.
@@ -7212,7 +7333,7 @@ index 28fc376..a1f989d 100644
      let ctx = ui.ctx();
      let c = rect.center();
      let disc = named(ui.interact(rect, ui.scope_id().with("np-sing"), Sense::click()), "Sing")
-@@ -536,12 +852,15 @@ fn sing_button(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -536,12 +855,15 @@ fn sing_button(app: &mut App, ui: &mut Ui, rect: Rect) {
      let h = theme::anim_bool(ctx, disc.id.with("h"), disc.hovered(), 0.15);
      // Idle wears the frosted disc the player's other chrome uses; engaged is the lit
      // one the corner toggles take.
@@ -7230,7 +7351,7 @@ index 28fc376..a1f989d 100644
      if disc.clicked() {
          app.sing = !app.sing;
          app.sing_level = 1.0;
-@@ -588,10 +907,7 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -588,10 +910,7 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
      let resp = named(ui.interact(track.expand(8.0), ui.scope_id().with("np-vol"), Sense::click_and_drag()), "Volume").on_hover_cursor(egui::CursorIcon::PointingHand);
      let h = theme::anim_bool(ctx, resp.id.with("h"), resp.hovered() || resp.dragged(), 0.15);
      ui.painter().rect_filled(track, 2.0, Color32::from_white_alpha(58));
@@ -7242,7 +7363,7 @@ index 28fc376..a1f989d 100644
      if let Some(p) = resp.interact_pointer_pos()
          && (resp.dragged() || resp.clicked())
      {
-@@ -613,6 +929,50 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -613,6 +932,50 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
      }
  }
  
@@ -7293,7 +7414,7 @@ index 28fc376..a1f989d 100644
  /// An engaged transport mark: the bare glyph, inked in the accent. Nothing sits behind it —
  /// off it is tertiary white, on it is themed, and the change is the whole announcement.
  pub(super) fn lit_mark(app: &App, on: f32, off: Color32) -> Color32 {
-@@ -635,8 +995,10 @@ fn split_explicit(title: &str) -> (String, bool) {
+@@ -635,8 +998,10 @@ fn split_explicit(title: &str) -> (String, bool) {
  
  /// Size of the artwork laid out in `col`: what is left once the sleeve's information,
  /// its bar and the transport underneath it have taken their room.
@@ -7306,7 +7427,7 @@ index 28fc376..a1f989d 100644
  }
  
  /// The sleeve: art, title and artists, the seek line with its two times, then the
-@@ -716,7 +1078,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -716,7 +1081,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let heard = if hold.is_some() { track.clone() } else { app.playing_track().cloned().unwrap_or_else(|| track.clone()) };
      let look = app.look();
      let cs = &look.cover;
@@ -7317,7 +7438,7 @@ index 28fc376..a1f989d 100644
      let round = cs.shape != Shape::Rounded;
      let radius = if round { side / 2.0 } else { cs.radius.clamp(0.0, side / 2.0) };
      // Apple draws the sleeve smaller while the song is held: the layout stays put, only the
-@@ -735,15 +1099,13 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -735,15 +1102,13 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          .best_part
          .as_ref()
          .filter(|(id, _)| app.playing_id() == Some(id.as_str()))
@@ -7339,7 +7460,7 @@ index 28fc376..a1f989d 100644
      // Spotify's canvas is parked for now: no lookup, no decoder, no picture. Everything
      // under it (the state, the backend ask, the loop, the cache) stays ready to switch
      // back on.
-@@ -803,6 +1165,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -803,6 +1168,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
                  if cs.brightness < 0.99 {
                      ui.painter().rect_filled(draw, draw_cr, theme::shade(1.0 - cs.brightness));
                  }
@@ -7350,7 +7471,7 @@ index 28fc376..a1f989d 100644
              }
          }
          // A handoff still shows the outgoing song; the stats are the incoming one's.
-@@ -815,11 +1181,27 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -815,11 +1184,27 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let x0 = art.left();
      let info_y = art.bottom() + 22.0;
      // The Best Part disc, the star and the ⋯ menu share the information line's right end.
@@ -7380,7 +7501,7 @@ index 28fc376..a1f989d 100644
      // The name is the way into the song's own sheet — the ⋯ menu no longer carries it.
      let about = ui.interact(tr.expand2(vec2(0.0, 3.0)), ui.scope_id().with("np-about"), Sense::click());
      let about = named(about, "About song").on_hover_cursor(egui::CursorIcon::PointingHand);
-@@ -841,7 +1223,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -841,7 +1226,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          line = format!("{line} — {}", album.name);
      }
      let line_w = text_w;
@@ -7398,7 +7519,7 @@ index 28fc376..a1f989d 100644
      // The album after the em dash opens its page too, underlined like the artists.
      if let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty())
          && let Some(id) = album.id.clone()
-@@ -865,13 +1256,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -865,13 +1259,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              }
          }
      }
@@ -7418,7 +7539,7 @@ index 28fc376..a1f989d 100644
          let bresp = ui.interact(disc_r, ui.scope_id().with("np-best-part"), Sense::click());
          let bresp = named(bresp, "Best Part").on_hover_text("Skip to the part of the song people replay most").on_hover_cursor(egui::CursorIcon::PointingHand);
          let bh = theme::anim_bool(ui.ctx(), bresp.id.with("h"), bresp.hovered(), 0.1) * bp;
-@@ -886,7 +1282,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -886,7 +1285,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // The star: a 30 px disc that washes under the pointer and fills in the accent
      // once liked. The ⋯ menu sits at the line's end, as on music.youtube.com.
      let liked = app.liked.contains(&heard.id);
@@ -7427,7 +7548,7 @@ index 28fc376..a1f989d 100644
      let sr = ui.interact(star, ui.scope_id().with(("np-like", &heard.id)), Sense::click());
      let sr = named(sr, if liked { "Remove from favourites" } else { "Add to favourites" }).on_hover_cursor(egui::CursorIcon::PointingHand);
      let sh = theme::anim_bool(ui.ctx(), sr.id.with("h"), sr.hovered(), 0.1);
-@@ -905,11 +1301,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -905,11 +1304,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          // The other half of the star: a right click tells YouTube the song isn't wanted.
          app.actions.push(Action::Dislike(heard.clone()));
      } else if sr.clicked() {
@@ -7445,7 +7566,7 @@ index 28fc376..a1f989d 100644
  
      // Seek: a 4 px line that grows under the pointer, its times below.
      let status = app.audio.status.clone();
-@@ -936,7 +1337,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -936,7 +1340,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          Some((_, _, pos)) => *pos,
          None => status.position_smooth().as_secs_f32(),
      };
@@ -7454,7 +7575,7 @@ index 28fc376..a1f989d 100644
      // The bar and its row of marks come first, directly under the song's name: elapsed
      // at the left, the stream's name centred, the remaining time at the right — all three
      // on one line, as the reference sets them. The transport a step below, the step being
-@@ -944,72 +1345,82 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -944,72 +1348,82 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // Transport first, because its measures set the step under the times line: the row is
      // spread over the sleeve's own width — the outer pair a hair inside its edges, the
      // skips a little under a quarter of the side out from the play button.
@@ -7564,7 +7685,7 @@ index 28fc376..a1f989d 100644
      // The marks are primary white, an off shuffle or repeat tertiary; a pressed button
      // shrinks to 90%, as the reference's does.
      let ink = |h: f32, base: f32, on: f32| theme::with_alpha(theme::lerp_color(theme::with_alpha(Color32::WHITE, base), Color32::WHITE, h), on);
-@@ -1023,26 +1434,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1023,26 +1437,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -7596,7 +7717,7 @@ index 28fc376..a1f989d 100644
      let mark = ink(h, 1.0, dim);
      let morph = theme::anim_bool(ui.ctx(), "np-play-morph", app.playing() || app.buffering, 0.18);
      if app.buffering {
-@@ -1064,7 +1475,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1064,7 +1478,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.toggle();
      }
      let (r, h, p) = btn(ui, 3, "next", "Next", enabled);
@@ -7605,7 +7726,7 @@ index 28fc376..a1f989d 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1076,8 +1487,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1076,8 +1490,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let looping = app.queue.repeat != Repeat::Off;
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
@@ -7616,7 +7737,7 @@ index 28fc376..a1f989d 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1085,6 +1496,171 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1085,6 +1499,171 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              Repeat::One => Repeat::Off,
          };
      }
@@ -7788,7 +7909,7 @@ index 28fc376..a1f989d 100644
  }
  
  /// The Best Part mark: the music note the button has always carried, with the skip mark
-@@ -1267,7 +1843,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+@@ -1267,7 +1846,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
  fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
      let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
      let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
@@ -7797,7 +7918,7 @@ index 28fc376..a1f989d 100644
          ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
          ui.add_space(14.0);
          let style = &app.look().lyrics;
-@@ -1317,7 +1893,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1317,7 +1896,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
          let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
          let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
          ui.set_max_height(max_height);
@@ -7806,7 +7927,7 @@ index 28fc376..a1f989d 100644
              ui.add_space(4.0);
              if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
                  // First in the menu, so unfolding it only ever adds rows below the ⋯:
-@@ -1356,6 +1932,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1356,6 +1935,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
              if widgets::menu_action(ui, Some(icon::THUMBS_DOWN), "Dislike") {
                  app.actions.push(Action::Dislike(track.clone()));
              }
@@ -7837,7 +7958,7 @@ index 28fc376..a1f989d 100644
              // Both shares answer for the same song — its own address and a card of its
              // lyrics — so they sit in one section.
              menu_divider(ui);
-@@ -1373,6 +1973,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1373,6 +1976,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
      });
  }
  
@@ -7859,7 +7980,7 @@ index 28fc376..a1f989d 100644
  fn lyric_options(app: &mut App, ui: &mut Ui) {
      let Some((id, set)) = app.lyrics.as_ref() else { return };
      let id = id.clone();
-@@ -1610,12 +2225,28 @@ fn shown_info(app: &App) -> Option<crate::hires::Info> {
+@@ -1610,12 +2228,28 @@ fn shown_info(app: &App) -> Option<crate::hires::Info> {
  /// The music-video player is on and its picture hasn't arrived yet: the song is still
  /// playing over the artwork, so the player says what it is doing where the quality mark
  /// usually stands.
@@ -7891,7 +8012,7 @@ index 28fc376..a1f989d 100644
          return text + glyph_side(small) + 5.0;
      }
      if app.audio_info.is_none() && app.upgrading_quality {
-@@ -1636,23 +2267,28 @@ pub(super) fn audio_badge_width(ui: &Ui, app: &App, small: bool) -> f32 {
+@@ -1636,23 +2270,28 @@ pub(super) fn audio_badge_width(ui: &Ui, app: &App, small: bool) -> f32 {
  /// The quality mark — a glyph and the stream's name, tinted with the theme — drawn at
  /// `at`; a click opens its details. Returns how much room it took.
  pub(super) fn audio_badge(app: &App, ui: &mut Ui, at: egui::Pos2, small: bool) -> f32 {
