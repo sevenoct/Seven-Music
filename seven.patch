@@ -5029,7 +5029,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..a99f379 100644
+index 28fc376..ab4fd02 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -70,6 +70,9 @@ pub fn overlay(app: &mut App, ctx: &egui::Context, now: f64) {
@@ -5345,10 +5345,19 @@ index 28fc376..a99f379 100644
      if let Some(p) = resp.interact_pointer_pos()
          && (resp.dragged() || resp.clicked())
      {
-@@ -613,6 +759,40 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -613,6 +759,50 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
      }
  }
  
++/// A bar `thick` tall centred on `cy`, snapped to whole physical pixels, so the seek line
++/// and the volume line are drawn with exactly the same number of pixel rows.
++fn snapped_bar(ui: &Ui, x0: f32, x1: f32, cy: f32, thick: f32) -> Rect {
++    let ppp = ui.ctx().pixels_per_point();
++    let rows = (thick * ppp).round().max(2.0);
++    let top = (cy * ppp - rows / 2.0).round();
++    Rect::from_min_max(pos2(x0, top / ppp), pos2(x1, (top + rows) / ppp))
++}
++
 +/// The minimal player's volume: a short thin line under the transport with one speaker at
 +/// its left, no glass. The speaker mutes; the wheel over the row nudges the level.
 +fn volume_bar(app: &mut App, ui: &mut Ui, rect: Rect) {
@@ -5359,7 +5368,8 @@ index 28fc376..a99f379 100644
 +    let h = theme::anim_bool(&ctx, resp.id.with("h"), resp.hovered() || resp.dragged(), 0.15);
 +    // Same thickness as the seek line (it thickens under the pointer the same way).
 +    let thick = 4.5 + 2.0 * h;
-+    let track = Rect::from_center_size(hit.center(), vec2(hit.width(), thick));
++    let track = snapped_bar(ui, hit.left(), hit.right(), hit.center().y, thick);
++    let thick = track.height();
 +    ui.painter().rect_filled(track, thick / 2.0, Color32::from_white_alpha(38));
 +    let played = Rect::from_min_max(track.min, pos2(track.left() + track.width() * vol.clamp(0.0, 1.0), track.bottom()));
 +    ui.painter().rect_filled(played, thick / 2.0, theme::lerp_color(Color32::from_white_alpha(190), Color32::WHITE, h));
@@ -5386,7 +5396,7 @@ index 28fc376..a99f379 100644
  /// An engaged transport mark: the bare glyph, inked in the accent. Nothing sits behind it —
  /// off it is tertiary white, on it is themed, and the change is the whole announcement.
  pub(super) fn lit_mark(app: &App, on: f32, off: Color32) -> Color32 {
-@@ -635,8 +815,10 @@ fn split_explicit(title: &str) -> (String, bool) {
+@@ -635,8 +825,10 @@ fn split_explicit(title: &str) -> (String, bool) {
  
  /// Size of the artwork laid out in `col`: what is left once the sleeve's information,
  /// its bar and the transport underneath it have taken their room.
@@ -5399,7 +5409,7 @@ index 28fc376..a99f379 100644
  }
  
  /// The sleeve: art, title and artists, the seek line with its two times, then the
-@@ -716,7 +898,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -716,7 +908,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let heard = if hold.is_some() { track.clone() } else { app.playing_track().cloned().unwrap_or_else(|| track.clone()) };
      let look = app.look();
      let cs = &look.cover;
@@ -5410,16 +5420,29 @@ index 28fc376..a99f379 100644
      let round = cs.shape != Shape::Rounded;
      let radius = if round { side / 2.0 } else { cs.radius.clamp(0.0, side / 2.0) };
      // Apple draws the sleeve smaller while the song is held: the layout stays put, only the
-@@ -743,7 +927,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
-         app.best_part_heard = true;
-     }
-     let ahead = app.show_best_part && offer.is_some_and(|ms| heard_ms < ms as f64 - 400.0);
+@@ -735,15 +929,13 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+         .best_part
+         .as_ref()
+         .filter(|(id, _)| app.playing_id() == Some(id.as_str()))
+-        .filter(|_| hold.is_none() && !app.best_part_heard)
++        .filter(|_| hold.is_none())
+         .map(|(_, start)| start.at_ms);
+-    if let Some(ms) = offer
+-        && heard_ms >= ms as f64 - 400.0
+-    {
+-        app.best_part_heard = true;
+-    }
+-    let ahead = app.show_best_part && offer.is_some_and(|ms| heard_ms < ms as f64 - 400.0);
 -    let bp = theme::anim_bool(ui.ctx(), "np-best-part", ahead, 0.28);
++    // The button stays for the whole song once its part is known: it used to leave for good
++    // when the playhead passed the part, so after a seek back or a replay it never returned
++    // beside the star. It jumps to the part from wherever the song is.
++    let ahead = app.show_best_part && offer.is_some();
 +    let bp = theme::anim_bool(ui.ctx(), "np-best-part", ahead, 0.12);
      // Spotify's canvas is parked for now: no lookup, no decoder, no picture. Everything
      // under it (the state, the backend ask, the loop, the cache) stays ready to switch
      // back on.
-@@ -803,6 +987,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -803,6 +995,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
                  if cs.brightness < 0.99 {
                      ui.painter().rect_filled(draw, draw_cr, theme::shade(1.0 - cs.brightness));
                  }
@@ -5430,7 +5453,7 @@ index 28fc376..a99f379 100644
              }
          }
          // A handoff still shows the outgoing song; the stats are the incoming one's.
-@@ -815,11 +1003,27 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -815,11 +1011,27 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let x0 = art.left();
      let info_y = art.bottom() + 22.0;
      // The Best Part disc, the star and the ⋯ menu share the information line's right end.
@@ -5460,7 +5483,7 @@ index 28fc376..a99f379 100644
      // The name is the way into the song's own sheet — the ⋯ menu no longer carries it.
      let about = ui.interact(tr.expand2(vec2(0.0, 3.0)), ui.scope_id().with("np-about"), Sense::click());
      let about = named(about, "About song").on_hover_cursor(egui::CursorIcon::PointingHand);
-@@ -841,7 +1045,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -841,7 +1053,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          line = format!("{line} — {}", album.name);
      }
      let line_w = text_w;
@@ -5478,7 +5501,7 @@ index 28fc376..a99f379 100644
      // The album after the em dash opens its page too, underlined like the artists.
      if let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty())
          && let Some(id) = album.id.clone()
-@@ -865,13 +1078,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -865,13 +1086,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              }
          }
      }
@@ -5498,7 +5521,7 @@ index 28fc376..a99f379 100644
          let bresp = ui.interact(disc_r, ui.scope_id().with("np-best-part"), Sense::click());
          let bresp = named(bresp, "Best Part").on_hover_text("Skip to the part of the song people replay most").on_hover_cursor(egui::CursorIcon::PointingHand);
          let bh = theme::anim_bool(ui.ctx(), bresp.id.with("h"), bresp.hovered(), 0.1) * bp;
-@@ -886,7 +1104,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -886,7 +1112,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // The star: a 30 px disc that washes under the pointer and fills in the accent
      // once liked. The ⋯ menu sits at the line's end, as on music.youtube.com.
      let liked = app.liked.contains(&heard.id);
@@ -5507,7 +5530,7 @@ index 28fc376..a99f379 100644
      let sr = ui.interact(star, ui.scope_id().with(("np-like", &heard.id)), Sense::click());
      let sr = named(sr, if liked { "Remove from favourites" } else { "Add to favourites" }).on_hover_cursor(egui::CursorIcon::PointingHand);
      let sh = theme::anim_bool(ui.ctx(), sr.id.with("h"), sr.hovered(), 0.1);
-@@ -905,11 +1123,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -905,11 +1131,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          // The other half of the star: a right click tells YouTube the song isn't wanted.
          app.actions.push(Action::Dislike(heard.clone()));
      } else if sr.clicked() {
@@ -5525,7 +5548,7 @@ index 28fc376..a99f379 100644
  
      // Seek: a 4 px line that grows under the pointer, its times below.
      let status = app.audio.status.clone();
-@@ -944,49 +1167,63 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -944,56 +1175,76 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // Transport first, because its measures set the step under the times line: the row is
      // spread over the sleeve's own width — the outer pair a hair inside its edges, the
      // skips a little under a quarter of the side out from the play button.
@@ -5553,7 +5576,13 @@ index 28fc376..a99f379 100644
 -    let bar = Rect::from_min_max(pos2(x0, hit.center().y - thick / 2.0), pos2(x0 + w, hit.center().y + thick / 2.0));
 +    // Minimal: the seek line and the volume line share one thickness, both rounded.
 +    let thick = if old { side * (0.008 + 0.0055 * focus) } else { 4.5 + 2.0 * focus };
-+    let bar = Rect::from_min_max(pos2(bx0, hit.center().y - thick / 2.0), pos2(bx0 + bw, hit.center().y + thick / 2.0));
++    let bar = if old {
++        Rect::from_min_max(pos2(bx0, hit.center().y - thick / 2.0), pos2(bx0 + bw, hit.center().y + thick / 2.0))
++    } else {
++        // The same whole-pixel line as the volume's, so the two read equally thick.
++        snapped_bar(ui, bx0, bx0 + bw, hit.center().y, thick)
++    };
++    let thick = bar.height();
 +    // Mochy's seek line: flat, no knob, the played part cut straight at its end.
 +    let frac_now = if total > 0.0 { (pos / total).clamp(0.0, 1.0) } else { 0.0 };
      ui.painter().rect_filled(bar, thick / 2.0, Color32::from_white_alpha(38));
@@ -5595,14 +5624,23 @@ index 28fc376..a99f379 100644
 +    ui.painter().galley(pos2(x0 + w - g.size().x + if old { 0.0 } else { 4.0 }, side_y - lh / 2.0), g, tc);
      let badge_w = audio_badge_width(ui, app, false);
      if badge_w > 0.0 {
+-        audio_badge(app, ui, pos2(x0 + (w - badge_w) / 2.0, times_y - lh / 2.0), false);
 +        let base_opacity = ui.opacity();
 +        ui.set_opacity(base_opacity * super::fx::calm(ui.ctx()));
-         audio_badge(app, ui, pos2(x0 + (w - badge_w) / 2.0, times_y - lh / 2.0), false);
++        audio_badge(app, ui, pos2(x0 + (w - badge_w) / 2.0, times_y - lh / 2.0 + if old { 0.0 } else { 7.0 }), false);
 +        ui.set_opacity(base_opacity);
      }
      // While the two songs blend, its name sits there instead.
      let mixed = theme::anim_bool(ui.ctx(), "np-automix-on", app.mixing(), 0.3);
-@@ -1009,7 +1246,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+     if mixed > 0.01 && badge_w == 0.0 {
+         let accent = theme::with_alpha(app.accent_color(), mixed);
+         let g = widgets::galley(ui, "Mixing", theme::semibold(10.5), accent, 80.0);
+-        ui.painter().galley(pos2(x0 + (w - g.size().x) / 2.0, times_y - g.size().y / 2.0), g, accent);
++        ui.painter().galley(pos2(x0 + (w - g.size().x) / 2.0, times_y - g.size().y / 2.0 + if old { 0.0 } else { 7.0 }), g, accent);
+     }
+     if total > 0.0
+         && let Some(p) = sresp.interact_pointer_pos()
+@@ -1009,7 +1260,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
  
      // Transport: the reference's row — shuffle, previous, play, next, repeat, spread over
      // the sleeve's own width.
@@ -5611,7 +5649,7 @@ index 28fc376..a99f379 100644
      // The marks are primary white, an off shuffle or repeat tertiary; a pressed button
      // shrinks to 90%, as the reference's does.
      let ink = |h: f32, base: f32, on: f32| theme::with_alpha(theme::lerp_color(theme::with_alpha(Color32::WHITE, base), Color32::WHITE, h), on);
-@@ -1023,26 +1260,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1023,26 +1274,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -5643,7 +5681,7 @@ index 28fc376..a99f379 100644
      let mark = ink(h, 1.0, dim);
      let morph = theme::anim_bool(ui.ctx(), "np-play-morph", app.playing() || app.buffering, 0.18);
      if app.buffering {
-@@ -1064,7 +1301,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1064,7 +1315,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.toggle();
      }
      let (r, h, p) = btn(ui, 3, "next", "Next", enabled);
@@ -5652,7 +5690,7 @@ index 28fc376..a99f379 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1076,8 +1313,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1076,8 +1327,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let looping = app.queue.repeat != Repeat::Off;
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
@@ -5663,7 +5701,7 @@ index 28fc376..a99f379 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1085,6 +1322,171 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1085,6 +1336,171 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              Repeat::One => Repeat::Off,
          };
      }
@@ -5835,7 +5873,7 @@ index 28fc376..a99f379 100644
  }
  
  /// The Best Part mark: the music note the button has always carried, with the skip mark
-@@ -1267,7 +1669,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+@@ -1267,7 +1683,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
  fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
      let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
      let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
@@ -5844,7 +5882,7 @@ index 28fc376..a99f379 100644
          ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
          ui.add_space(14.0);
          let style = &app.look().lyrics;
-@@ -1317,7 +1719,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1317,7 +1733,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
          let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
          let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
          ui.set_max_height(max_height);
@@ -5853,7 +5891,7 @@ index 28fc376..a99f379 100644
              ui.add_space(4.0);
              if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
                  // First in the menu, so unfolding it only ever adds rows below the ⋯:
-@@ -1356,6 +1758,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1356,6 +1772,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
              if widgets::menu_action(ui, Some(icon::THUMBS_DOWN), "Dislike") {
                  app.actions.push(Action::Dislike(track.clone()));
              }
@@ -5884,7 +5922,7 @@ index 28fc376..a99f379 100644
              // Both shares answer for the same song — its own address and a card of its
              // lyrics — so they sit in one section.
              menu_divider(ui);
-@@ -1373,6 +1799,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1373,6 +1813,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
      });
  }
  
