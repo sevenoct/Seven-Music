@@ -2487,7 +2487,7 @@ index d811d41..b766d33 100644
          avc1.extend_from_slice(&0x18u16.to_be_bytes());
          avc1.extend_from_slice(&(-1i16).to_be_bytes());
 diff --git a/src/theme.rs b/src/theme.rs
-index 499f222..c4dbc92 100644
+index 499f222..86f90bf 100644
 --- a/src/theme.rs
 +++ b/src/theme.rs
 @@ -7,17 +7,19 @@ use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId};
@@ -2517,7 +2517,19 @@ index 499f222..c4dbc92 100644
  
  /// Light or dark, as the app picked it for what's being drawn (see `set_mode`): the
  /// colours below follow it. Now playing always draws dark, over the album art.
-@@ -61,12 +63,12 @@ pub fn bg() -> Color32 {
+@@ -52,6 +54,11 @@ pub fn text_faint() -> Color32 {
+     if light() { TEXT_FAINT_LIGHT } else { TEXT_FAINT }
+ }
+ 
++/// The base colour of one mode, whichever mode is drawing now.
++pub fn base(light: bool) -> Color32 {
++    if light { BG_LIGHT } else { BG }
++}
++
+ /// The window's base colour, under the background.
+ pub fn bg() -> Color32 {
+     if light() { BG_LIGHT } else { BG }
+@@ -61,12 +68,12 @@ pub fn bg() -> Color32 {
  /// reads as a solid dimmed surface, not a see-through glass. egui can't sample what it
  /// has already painted, so the frost is a dense material rather than a blurred copy.
  pub fn menu_fill() -> Color32 {
@@ -2532,7 +2544,7 @@ index 499f222..c4dbc92 100644
  }
  
  /// Theme preset multiplier for every glass surface (f32 bits; 1.0 by default).
-@@ -82,7 +84,7 @@ pub fn glass(a: f32) -> Color32 {
+@@ -82,7 +89,7 @@ pub fn glass(a: f32) -> Color32 {
  /// A panel over the background (sidebar, player bar, queue): darker than the page at
  /// `a`, or in light mode lighter.
  pub fn panel(a: f32) -> Color32 {
@@ -2541,7 +2553,7 @@ index 499f222..c4dbc92 100644
  }
  
  /// The active theme's secondary text colour, set with its chrome (read very often).
-@@ -1044,14 +1046,15 @@ fn visuals() -> egui::Visuals {
+@@ -1044,14 +1051,15 @@ fn visuals() -> egui::Visuals {
      v.window_fill = menu_fill();
      v.extreme_bg_color = glass(0.08);
      v.override_text_color = Some(text());
@@ -2936,10 +2948,10 @@ index 420d560..610a67f 100644
              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
-index 0000000..d47cad4
+index 0000000..5db8e3d
 --- /dev/null
 +++ b/src/ui/fx.rs
-@@ -0,0 +1,504 @@
+@@ -0,0 +1,523 @@
 +//! Small effects borrowed from Mochy Music: the wavy seek line, the like burst, the press
 +//! bounce, the visualizer beside the player, the staggered entrance of cards and the
 +//! greeting on Home. Everything is drawn with the painter calls the rest of the app
@@ -3442,6 +3454,25 @@ index 0000000..d47cad4
 +        // Lands on the Account group, which stands first in Settings.
 +        ui.ctx().data_mut(|d| d.insert_temp(Id::new("settings-to-top"), true));
 +        app.actions.push(super::Action::Go(Page::Settings));
++    }
++}
++
++/// Dark to light and back as a soft dissolve: for a moment a sheet of the old mode's
++/// colour lies over the window and thins out, instead of the colours cutting over.
++pub fn mode_fade(ctx: &Context, light: bool) {
++    let id = Id::new("mode-fade");
++    let now = ctx.input(|i| i.time);
++    let (last, mut at): (bool, f64) = ctx.data(|d| d.get_temp(id)).unwrap_or((light, f64::NEG_INFINITY));
++    if last != light {
++        at = now;
++    }
++    ctx.data_mut(|d| d.insert_temp(id, (light, at)));
++    let t = ((now - at) / 0.5) as f32;
++    if t < 1.0 {
++        let k = 1.0 - theme::ease_in_out(t.max(0.0));
++        let layer = egui::LayerId::new(egui::Order::Foreground, Id::new("mode-fade-layer"));
++        ctx.layer_painter(layer).rect_filled(ctx.content_rect(), 0.0, theme::with_alpha(theme::base(!light), 0.92 * k));
++        ctx.request_repaint();
 +    }
 +}
 diff --git a/src/ui/glyphs.rs b/src/ui/glyphs.rs
@@ -4330,7 +4361,7 @@ index 249fb6f..b81defb 100644
              && (sresp.clicked() || sresp.dragged())
          {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..379e23b 100644
+index 252e6b9..e7e734e 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,10 @@ mod backdrop;
@@ -4777,7 +4808,18 @@ index 252e6b9..379e23b 100644
          } else if playing || self.buffering {
              ctx.request_repaint_after(Duration::from_millis(250));
          }
-@@ -2106,7 +2423,6 @@ impl eframe::App for App {
+@@ -2096,7 +2413,9 @@ impl eframe::App for App {
+         if dev_var("YTM_FULLSCREEN").and_then(|v| v.parse::<f64>().ok()).is_some_and(|t| now >= t) && !self.fullscreen {
+             self.set_fullscreen(&ctx, true);
+         }
+-        let light = self.light_pages(&ctx) && np < 0.5 && !self.fullscreen;
++        let pages_light = self.light_pages(&ctx);
++        fx::mode_fade(&ctx, pages_light);
++        let light = pages_light && np < 0.5 && !self.fullscreen;
+         theme::set_mode(&ctx, light);
+         if self.chrome_applied.as_deref() != Some(look.id.as_str()) {
+             self.apply_chrome(&ctx);
+@@ -2106,7 +2425,6 @@ impl eframe::App for App {
          // The full-screen player always keeps the sung lines: its sheet is the whole
          // picture, and the setting only trims the panels.
          ctx.data_mut(|d| d.insert_temp(egui::Id::unique("lyrics-past"), self.show_past_lines || self.fullscreen));
@@ -4785,7 +4827,7 @@ index 252e6b9..379e23b 100644
          // Once now playing has slid all the way up it hides everything but the player
          // bar, so the pages and the full-screen background under it aren't drawn.
          let covered = !self.fullscreen && np >= 1.0;
-@@ -2140,32 +2456,16 @@ impl eframe::App for App {
+@@ -2140,32 +2458,16 @@ impl eframe::App for App {
                  .exact_size(self.bar_height())
                  .frame(egui::Frame::new())
                  .show_separator_line(false)
@@ -4826,7 +4868,7 @@ index 252e6b9..379e23b 100644
              let section = ui.available_rect_before_wrap();
              let q = theme::anim_bool(&ctx, "queue-drawer", self.queue_open && !self.np_open, 0.25);
              if q > 0.01 {
-@@ -2188,11 +2488,13 @@ impl eframe::App for App {
+@@ -2188,11 +2490,13 @@ impl eframe::App for App {
              let main_right = ui.available_rect_before_wrap().right();
              egui::CentralPanel::default()
                  .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -4842,7 +4884,7 @@ index 252e6b9..379e23b 100644
                      bottom: 0,
                  }))
                  .show(ui, |ui| {
-@@ -2208,9 +2510,17 @@ impl eframe::App for App {
+@@ -2208,9 +2512,17 @@ impl eframe::App for App {
                  .order(egui::Order::Middle)
                  .show(&ctx, |ui| {
                      ui.scope_builder(egui::UiBuilder::new().max_rect(strip).layout(egui::Layout::top_down(egui::Align::Min)), |ui| {
@@ -4860,7 +4902,7 @@ index 252e6b9..379e23b 100644
          }
          if np > 0.001 {
              let pages = theme::set_mode(&ctx, false);
-@@ -2223,15 +2533,26 @@ impl eframe::App for App {
+@@ -2223,15 +2535,26 @@ impl eframe::App for App {
          notes::dialog(self, &ctx);
          if let Some(url) = self.share_pending.take() { ctx.copy_text(url); }
          shell::suggestions(self, &ctx);
@@ -4888,7 +4930,7 @@ index 252e6b9..379e23b 100644
  
          if dev_var("YTM_THEME_TOUR").is_some() {
              self.theme_tour(&ctx, now);
-@@ -2392,7 +2713,21 @@ impl eframe::App for App {
+@@ -2392,7 +2715,21 @@ impl eframe::App for App {
              storage.set_string("font", theme::font_choice());
          }
          storage.set_string("anim_bg", b(self.anim_bg));
@@ -4910,7 +4952,7 @@ index 252e6b9..379e23b 100644
          storage.set_string("reactive_bg", b(self.reactive_bg));
          storage.set_string("disable_blur", b(self.disable_blur));
          storage.set_string("animated_artwork", b(self.animated_artwork));
-@@ -2543,6 +2878,43 @@ struct PlayingAs {
+@@ -2543,6 +2880,43 @@ struct PlayingAs {
  }
  
  
@@ -4954,7 +4996,7 @@ index 252e6b9..379e23b 100644
  /// A restored window size can exceed the monitor (e.g. saved after maximizing),
  /// leaving the player bar partly off-screen. Once at startup, maximize instead.
  fn fit_window_to_monitor(ctx: &egui::Context) {
-@@ -2639,7 +3011,8 @@ pub use crate::model::shuffle;
+@@ -2639,7 +3013,8 @@ pub use crate::model::shuffle;
  /// can't change while running, and the check touches the disk, so it runs once.
  fn updatable() -> bool {
      static UPDATABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -4987,7 +5029,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..9dd1631 100644
+index 28fc376..3cfc0ab 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -70,6 +70,9 @@ pub fn overlay(app: &mut App, ctx: &egui::Context, now: f64) {
@@ -5621,7 +5663,7 @@ index 28fc376..9dd1631 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1085,6 +1322,85 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1085,6 +1322,169 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              Repeat::One => Repeat::Off,
          };
      }
@@ -5633,7 +5675,10 @@ index 28fc376..9dd1631 100644
 +    // Minimal: the output picker under the volume. It stays put when the idle fade takes
 +    // the other buttons.
 +    if !old {
-+        output_pill(app, ui, pos2(art.center().x, ty + icons[2] * 0.5 + 94.0));
++        let row_y = ty + icons[2] * 0.5 + 94.0;
++        let out = output_pill(app, ui, pos2(art.center().x, row_y));
++        // The sleep timer's countdown waits beside it while one is running.
++        sleep_pill(app, ui, pos2(out.right() + 8.0, row_y));
 +    }
 +}
 +
@@ -5675,23 +5720,55 @@ index 28fc376..9dd1631 100644
 +}
 +
 +/// The audio output button: the same Output device as Settings, here beside the player.
-+/// It shows the same value and opens the same list, and picking changes the device right
-+/// there. The mark says what the device is: speaker, headset, screen, Bluetooth.
-+fn output_pill(app: &mut App, ui: &mut Ui, center: egui::Pos2) {
++/// It shows only what the device is (Speaker, Headset, Display) and opens the same list
++/// with the full names; picking changes the device right there. When the choice changes
++/// the mark and word rise in, and a toast names the full device.
++fn output_pill(app: &mut App, ui: &mut Ui, center: egui::Pos2) -> Rect {
 +    let ctx = ui.ctx().clone();
-+    let label = super::pages::output_device_label(app);
-+    let (kind, bluetooth) = device_kind(&label);
-+    let g = widgets::galley(ui, &label, badge_font(false), Color32::WHITE, 210.0);
++    let now = ui.input(|i| i.time);
++    let full = super::pages::output_device_label(app);
++    let (kind, bluetooth) = device_kind(&full);
++    let word = if app.output_device.is_none() {
++        "Default"
++    } else {
++        match kind {
++            DeviceKind::Speaker => "Speaker",
++            DeviceKind::Headset => "Headset",
++            DeviceKind::Display => "Display",
++        }
++    };
++    // A change of device, seen while the button was on screen: start the entrance.
++    let key = egui::Id::new("np-output-seen");
++    let seen: Option<(String, f64, f64)> = ctx.data(|d| d.get_temp(key));
++    let changed_at = match seen {
++        Some((last, at, last_seen)) if now - last_seen < 1.0 => {
++            if last != full {
++                app.toast(format!("Output: {full}"));
++                now
++            } else {
++                at
++            }
++        }
++        Some((_, at, _)) => at,
++        None => f64::NEG_INFINITY,
++    };
++    ctx.data_mut(|d| d.insert_temp(key, (full.clone(), changed_at, now)));
++    let k = theme::ease_out(((now - changed_at) / 0.45).clamp(0.0, 1.0) as f32);
++    if k < 1.0 {
++        ctx.request_repaint();
++    }
++    let rise = (1.0 - k) * 5.0;
++    let g = widgets::galley(ui, word, badge_font(false), Color32::WHITE, 210.0);
 +    let icon_w = 16.0 + if bluetooth { 10.0 } else { 0.0 };
 +    let w = icon_w + 6.0 + g.size().x;
 +    let rect = Rect::from_center_size(center, vec2(w + 22.0, 26.0));
 +    let resp = ui.interact(rect, ui.scope_id().with("np-output"), Sense::click());
-+    let resp = named(resp, "Output device").on_hover_cursor(egui::CursorIcon::PointingHand);
++    let resp = named(resp, "Output device").on_hover_text(full.as_str()).on_hover_cursor(egui::CursorIcon::PointingHand);
 +    let open = egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&resp));
 +    let hover = theme::anim_bool(&ctx, resp.id.with("h"), resp.hovered() || open, 0.12);
 +    ui.painter().rect_filled(rect, 7.0, Color32::from_white_alpha(13 + (10.0 * hover) as u8));
-+    let ink = theme::lerp_color(Color32::from_white_alpha(185), Color32::WHITE, hover);
-+    let mid = rect.center().y;
++    let ink = theme::with_alpha(theme::lerp_color(Color32::from_white_alpha(185), Color32::WHITE, hover), k);
++    let mid = rect.center().y + rise;
 +    let x0 = rect.left() + 11.0;
 +    let main = pos2(x0 + 8.0, mid);
 +    match kind {
@@ -5702,12 +5779,61 @@ index 28fc376..9dd1631 100644
 +    if bluetooth {
 +        bluetooth_mark(ui, pos2(x0 + 21.0, mid), 12.0, ink);
 +    }
-+    ui.painter().galley(pos2(x0 + icon_w + 6.0, mid - g.size().y / 2.0), g, ink);
++    ui.painter().galley_with_override_text_color(pos2(x0 + icon_w + 6.0, mid - g.size().y / 2.0), g, ink);
 +    super::pages::output_device_popup(app, &resp);
++    rect
++}
++
++/// The sleep timer's countdown: a thin ring that empties and the time left, in the same
++/// clear box as the output button. A click cancels the timer.
++fn sleep_pill(app: &mut App, ui: &mut Ui, left_mid: egui::Pos2) {
++    let now = ui.input(|i| i.time);
++    let (text, frac) = if let Some(end) = app.sleep_end {
++        let left = (end - now).max(0.0);
++        let total = app.sleep_pick.map_or(0.0, |m| m as f64 * 60.0).max(1.0);
++        let secs = left.ceil() as u32;
++        let text = if secs >= 3600 { format!("{}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60) } else { super::fmt_time(secs) };
++        (text, Some((left / total).clamp(0.0, 1.0) as f32))
++    } else if app.sleep_song.is_some() {
++        ("End of song".to_owned(), None)
++    } else {
++        return;
++    };
++    ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
++    let g = widgets::galley(ui, &text, badge_font(false), Color32::WHITE, 120.0);
++    let w = 14.0 + 6.0 + g.size().x;
++    let rect = Rect::from_min_size(pos2(left_mid.x, left_mid.y - 13.0), vec2(w + 22.0, 26.0));
++    let resp = ui.interact(rect, ui.scope_id().with("np-sleep"), Sense::click());
++    let resp = named(resp, "Sleep timer").on_hover_text("Cancel the sleep timer").on_hover_cursor(egui::CursorIcon::PointingHand);
++    let hover = theme::anim_bool(ui.ctx(), resp.id.with("h"), resp.hovered(), 0.12);
++    ui.painter().rect_filled(rect, 7.0, Color32::from_white_alpha(13 + (10.0 * hover) as u8));
++    let ink = theme::lerp_color(Color32::from_white_alpha(185), Color32::WHITE, hover);
++    let c = pos2(rect.left() + 11.0 + 7.0, rect.center().y);
++    ui.painter().circle_stroke(c, 5.5, egui::Stroke::new(1.4, Color32::from_white_alpha(46)));
++    match frac {
++        Some(f) if f > 0.0 => {
++            // The part still to come, drawn clockwise from the top.
++            let steps = ((f * 48.0).ceil() as usize).max(2);
++            let pts: Vec<egui::Pos2> = (0..=steps)
++                .map(|i| {
++                    let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * f * i as f32 / steps as f32;
++                    pos2(c.x + 5.5 * a.cos(), c.y + 5.5 * a.sin())
++                })
++                .collect();
++            ui.painter().add(egui::Shape::Path(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(1.4, ink))));
++        }
++        Some(_) => {}
++        None => ui.painter().circle_filled(c, 2.2, ink),
++    }
++    ui.painter().galley_with_override_text_color(pos2(rect.left() + 11.0 + 14.0 + 6.0, rect.center().y - g.size().y / 2.0), g, ink);
++    if resp.clicked() {
++        app.sleep_cancel();
++        app.toast("Sleep timer off");
++    }
  }
  
  /// The Best Part mark: the music note the button has always carried, with the skip mark
-@@ -1267,7 +1583,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+@@ -1267,7 +1667,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
  fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
      let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
      let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
@@ -5716,7 +5842,7 @@ index 28fc376..9dd1631 100644
          ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
          ui.add_space(14.0);
          let style = &app.look().lyrics;
-@@ -1317,7 +1633,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1317,7 +1717,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
          let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
          let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
          ui.set_max_height(max_height);
@@ -5725,7 +5851,7 @@ index 28fc376..9dd1631 100644
              ui.add_space(4.0);
              if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
                  // First in the menu, so unfolding it only ever adds rows below the ⋯:
-@@ -1356,6 +1672,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1356,6 +1756,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
              if widgets::menu_action(ui, Some(icon::THUMBS_DOWN), "Dislike") {
                  app.actions.push(Action::Dislike(track.clone()));
              }
@@ -5756,7 +5882,7 @@ index 28fc376..9dd1631 100644
              // Both shares answer for the same song — its own address and a card of its
              // lyrics — so they sit in one section.
              menu_divider(ui);
-@@ -1373,6 +1713,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1373,6 +1797,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
      });
  }
  
