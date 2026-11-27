@@ -2967,7 +2967,7 @@ index 27d93cd..6ce3038 100644
          } else {
              self.toast(if ok.len() == 1 { "Uploading 1 song…".to_owned() } else { format!("Uploading {} songs…", ok.len()) });
 diff --git a/src/ui/actions.rs b/src/ui/actions.rs
-index f869295..04b5922 100644
+index f869295..39fad06 100644
 --- a/src/ui/actions.rs
 +++ b/src/ui/actions.rs
 @@ -83,14 +83,14 @@ impl App {
@@ -3039,7 +3039,15 @@ index f869295..04b5922 100644
                      return;
                  }
                  let Some(c) = self.current_collection().filter(|c| c.id == playlist && c.owned && !c.is_album) else { return };
-@@ -412,6 +432,8 @@ impl App {
+@@ -405,6 +425,7 @@ impl App {
+                     }
+                 }
+                 keys::Cmd::Fullscreen if !strip && self.np_open => self.set_fullscreen(ctx, !self.fullscreen),
++                keys::Cmd::ClockMode if !strip && self.np_open && self.current().is_some() => self.clock_mode = !self.clock_mode,
+                 keys::Cmd::Back if !strip => self.nav_back(),
+                 keys::Cmd::Forward if !strip => self.nav_forward(),
+                 keys::Cmd::Close if !strip => {
+@@ -412,6 +433,8 @@ impl App {
                      // keeping the video, then the video, then the player itself.
                      if self.fullscreen {
                          self.set_fullscreen(ctx, false);
@@ -4457,6 +4465,42 @@ index 5fb5537..6dc2203 100644
              settings_field(ui, &mut app.jam_server, "jam.example.com", 96);
          });
      });
+diff --git a/src/ui/keys.rs b/src/ui/keys.rs
+index 2137a5f..a23234e 100644
+--- a/src/ui/keys.rs
++++ b/src/ui/keys.rs
+@@ -31,6 +31,7 @@ pub enum Cmd {
+     Forward,
+     Close,
+     MiniPlayer,
++    ClockMode,
+ }
+ 
+ impl Cmd {
+@@ -50,6 +51,7 @@ impl Cmd {
+         Self::Forward,
+         Self::Close,
+         Self::MiniPlayer,
++        Self::ClockMode,
+     ];
+ 
+     pub fn info(self) -> &'static Info {
+@@ -115,6 +117,7 @@ impl Info {
+             Cmd::Forward => "forward",
+             Cmd::Close => "close",
+             Cmd::MiniPlayer => "mini_player",
++            Cmd::ClockMode => "clock_mode",
+         }
+     }
+ }
+@@ -139,6 +142,7 @@ pub const INFOS: &[Info] = &[
+     Info { cmd: Cmd::Forward, label: "Forward", default: combo(Key::ArrowRight, false, true, false), guard: Guard::Anywhere, repeat: false },
+     Info { cmd: Cmd::Close, label: "Close now playing", default: combo(Key::Escape, false, false, false), guard: Guard::Anywhere, repeat: false },
+     Info { cmd: Cmd::MiniPlayer, label: "Mini player", default: combo(Key::M, true, false, false), guard: Guard::Anywhere, repeat: false },
++    Info { cmd: Cmd::ClockMode, label: "Clock mode (in now playing)", default: combo(Key::C, false, false, false), guard: Guard::NotTyping, repeat: false },
+ ];
+ 
+ impl Combo {
 diff --git a/src/ui/lyrics_share.rs b/src/ui/lyrics_share.rs
 index a3a7519..8425182 100644
 --- a/src/ui/lyrics_share.rs
@@ -5459,7 +5503,7 @@ index f0c14b8..d3b21ea 100644
                  match &body {
                      Some(md) => show(ui, &parse(md), 14.0),
 diff --git a/src/ui/nowplaying.rs b/src/ui/nowplaying.rs
-index 28fc376..b2d6299 100644
+index 28fc376..b825698 100644
 --- a/src/ui/nowplaying.rs
 +++ b/src/ui/nowplaying.rs
 @@ -53,6 +53,9 @@ pub(super) fn lyrics_shown(app: &App, ctx: &egui::Context) -> bool {
@@ -5805,7 +5849,7 @@ index 28fc376..b2d6299 100644
  }
  
  /// One of a header capsule's two equal cells.
-@@ -515,6 +705,134 @@ fn cap_slot(ui: &mut Ui, cap: Rect, i: usize, key: &str, name: &str) -> egui::Re
+@@ -515,6 +705,140 @@ fn cap_slot(ui: &mut Ui, cap: Rect, i: usize, key: &str, name: &str) -> egui::Re
      named(resp, name).on_hover_text(name).on_hover_cursor(egui::CursorIcon::PointingHand)
  }
  
@@ -5901,8 +5945,14 @@ index 28fc376..b2d6299 100644
 +
 +    let batt_h = batt_g.as_ref().map_or(0.0, |g| 14.0 + g.size().y.max(BATTERY_W * 0.5));
 +    let total = time_g.size().y + 4.0 + date_g.size().y + batt_h + 40.0 + title_g.size().y + 8.0 + artist_g.size().y;
-+    let mut y = area.center().y - total / 2.0;
-+    let x0 = area.left();
++    // Against burn-in on an OLED: the block drifts to a new place (up to 12 points each way)
++    // every minute, slowly enough that it is never seen moving.
++    let minute = crate::ytmapi::local_secs().div_euclid(60);
++    let (tx, ty) = (((minute * 7).rem_euclid(25) - 12) as f32, ((minute * 11).rem_euclid(25) - 12) as f32);
++    let dx = ctx.animate_value_with_time(egui::Id::unique("clock-shift-x"), tx, 20.0);
++    let dy = ctx.animate_value_with_time(egui::Id::unique("clock-shift-y"), ty, 20.0);
++    let mut y = area.center().y - total / 2.0 + dy;
++    let x0 = area.left() + dx;
 +    let painter = ui.painter().clone();
 +
 +    painter.galley(pos2(x0, y), time_g.clone(), theme::text());
@@ -5940,7 +5990,7 @@ index 28fc376..b2d6299 100644
  /// Apple's picture-in-picture mark: a centered screen with a smaller inset at its lower
  /// right. Drawn rather than carried as an asset — the icon font has no PiP glyph.
  fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
-@@ -527,7 +845,7 @@ fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
+@@ -527,7 +851,7 @@ fn pip_mark(ui: &Ui, c: egui::Pos2, s: f32, tint: Color32) {
  
  /// Apple's Sing mark toggles full vocal reduction from the player header. Drawn rather
  /// than carried as an asset — the icon set has no mic-with-sparkles glyph.
@@ -5949,7 +5999,7 @@ index 28fc376..b2d6299 100644
      let ctx = ui.ctx();
      let c = rect.center();
      let disc = named(ui.interact(rect, ui.scope_id().with("np-sing"), Sense::click()), "Sing")
-@@ -536,12 +854,15 @@ fn sing_button(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -536,12 +860,15 @@ fn sing_button(app: &mut App, ui: &mut Ui, rect: Rect) {
      let h = theme::anim_bool(ctx, disc.id.with("h"), disc.hovered(), 0.15);
      // Idle wears the frosted disc the player's other chrome uses; engaged is the lit
      // one the corner toggles take.
@@ -5967,7 +6017,7 @@ index 28fc376..b2d6299 100644
      if disc.clicked() {
          app.sing = !app.sing;
          app.sing_level = 1.0;
-@@ -588,10 +909,7 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -588,10 +915,7 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
      let resp = named(ui.interact(track.expand(8.0), ui.scope_id().with("np-vol"), Sense::click_and_drag()), "Volume").on_hover_cursor(egui::CursorIcon::PointingHand);
      let h = theme::anim_bool(ctx, resp.id.with("h"), resp.hovered() || resp.dragged(), 0.15);
      ui.painter().rect_filled(track, 2.0, Color32::from_white_alpha(58));
@@ -5979,7 +6029,7 @@ index 28fc376..b2d6299 100644
      if let Some(p) = resp.interact_pointer_pos()
          && (resp.dragged() || resp.clicked())
      {
-@@ -613,6 +931,50 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
+@@ -613,6 +937,50 @@ fn volume_pill(app: &mut App, ui: &mut Ui, rect: Rect) {
      }
  }
  
@@ -6030,7 +6080,7 @@ index 28fc376..b2d6299 100644
  /// An engaged transport mark: the bare glyph, inked in the accent. Nothing sits behind it —
  /// off it is tertiary white, on it is themed, and the change is the whole announcement.
  pub(super) fn lit_mark(app: &App, on: f32, off: Color32) -> Color32 {
-@@ -635,8 +997,10 @@ fn split_explicit(title: &str) -> (String, bool) {
+@@ -635,8 +1003,10 @@ fn split_explicit(title: &str) -> (String, bool) {
  
  /// Size of the artwork laid out in `col`: what is left once the sleeve's information,
  /// its bar and the transport underneath it have taken their room.
@@ -6043,7 +6093,7 @@ index 28fc376..b2d6299 100644
  }
  
  /// The sleeve: art, title and artists, the seek line with its two times, then the
-@@ -716,7 +1080,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -716,7 +1086,9 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let heard = if hold.is_some() { track.clone() } else { app.playing_track().cloned().unwrap_or_else(|| track.clone()) };
      let look = app.look();
      let cs = &look.cover;
@@ -6054,7 +6104,7 @@ index 28fc376..b2d6299 100644
      let round = cs.shape != Shape::Rounded;
      let radius = if round { side / 2.0 } else { cs.radius.clamp(0.0, side / 2.0) };
      // Apple draws the sleeve smaller while the song is held: the layout stays put, only the
-@@ -735,15 +1101,13 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -735,15 +1107,13 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          .best_part
          .as_ref()
          .filter(|(id, _)| app.playing_id() == Some(id.as_str()))
@@ -6076,7 +6126,7 @@ index 28fc376..b2d6299 100644
      // Spotify's canvas is parked for now: no lookup, no decoder, no picture. Everything
      // under it (the state, the backend ask, the loop, the cache) stays ready to switch
      // back on.
-@@ -803,6 +1167,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -803,6 +1173,10 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
                  if cs.brightness < 0.99 {
                      ui.painter().rect_filled(draw, draw_cr, theme::shade(1.0 - cs.brightness));
                  }
@@ -6087,7 +6137,7 @@ index 28fc376..b2d6299 100644
              }
          }
          // A handoff still shows the outgoing song; the stats are the incoming one's.
-@@ -815,11 +1183,27 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -815,11 +1189,27 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let x0 = art.left();
      let info_y = art.bottom() + 22.0;
      // The Best Part disc, the star and the ⋯ menu share the information line's right end.
@@ -6117,7 +6167,7 @@ index 28fc376..b2d6299 100644
      // The name is the way into the song's own sheet — the ⋯ menu no longer carries it.
      let about = ui.interact(tr.expand2(vec2(0.0, 3.0)), ui.scope_id().with("np-about"), Sense::click());
      let about = named(about, "About song").on_hover_cursor(egui::CursorIcon::PointingHand);
-@@ -841,7 +1225,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -841,7 +1231,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          line = format!("{line} — {}", album.name);
      }
      let line_w = text_w;
@@ -6135,7 +6185,7 @@ index 28fc376..b2d6299 100644
      // The album after the em dash opens its page too, underlined like the artists.
      if let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty())
          && let Some(id) = album.id.clone()
-@@ -865,13 +1258,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -865,13 +1264,18 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              }
          }
      }
@@ -6155,7 +6205,7 @@ index 28fc376..b2d6299 100644
          let bresp = ui.interact(disc_r, ui.scope_id().with("np-best-part"), Sense::click());
          let bresp = named(bresp, "Best Part").on_hover_text("Skip to the part of the song people replay most").on_hover_cursor(egui::CursorIcon::PointingHand);
          let bh = theme::anim_bool(ui.ctx(), bresp.id.with("h"), bresp.hovered(), 0.1) * bp;
-@@ -886,7 +1284,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -886,7 +1290,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // The star: a 30 px disc that washes under the pointer and fills in the accent
      // once liked. The ⋯ menu sits at the line's end, as on music.youtube.com.
      let liked = app.liked.contains(&heard.id);
@@ -6164,7 +6214,7 @@ index 28fc376..b2d6299 100644
      let sr = ui.interact(star, ui.scope_id().with(("np-like", &heard.id)), Sense::click());
      let sr = named(sr, if liked { "Remove from favourites" } else { "Add to favourites" }).on_hover_cursor(egui::CursorIcon::PointingHand);
      let sh = theme::anim_bool(ui.ctx(), sr.id.with("h"), sr.hovered(), 0.1);
-@@ -905,11 +1303,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -905,11 +1309,16 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          // The other half of the star: a right click tells YouTube the song isn't wanted.
          app.actions.push(Action::Dislike(heard.clone()));
      } else if sr.clicked() {
@@ -6182,7 +6232,7 @@ index 28fc376..b2d6299 100644
  
      // Seek: a 4 px line that grows under the pointer, its times below.
      let status = app.audio.status.clone();
-@@ -936,7 +1339,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -936,7 +1345,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          Some((_, _, pos)) => *pos,
          None => status.position_smooth().as_secs_f32(),
      };
@@ -6191,7 +6241,7 @@ index 28fc376..b2d6299 100644
      // The bar and its row of marks come first, directly under the song's name: elapsed
      // at the left, the stream's name centred, the remaining time at the right — all three
      // on one line, as the reference sets them. The transport a step below, the step being
-@@ -944,72 +1347,82 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -944,72 +1353,82 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      // Transport first, because its measures set the step under the times line: the row is
      // spread over the sleeve's own width — the outer pair a hair inside its edges, the
      // skips a little under a quarter of the side out from the play button.
@@ -6301,7 +6351,7 @@ index 28fc376..b2d6299 100644
      // The marks are primary white, an off shuffle or repeat tertiary; a pressed button
      // shrinks to 90%, as the reference's does.
      let ink = |h: f32, base: f32, on: f32| theme::with_alpha(theme::lerp_color(theme::with_alpha(Color32::WHITE, base), Color32::WHITE, h), on);
-@@ -1023,26 +1436,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1023,26 +1442,26 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), live && resp.hovered(), 0.1);
          let p = theme::anim_bool(ui.ctx(), resp.id.with("p"), live && resp.is_pointer_button_down_on(), 0.1);
          if h > 0.0 {
@@ -6333,7 +6383,7 @@ index 28fc376..b2d6299 100644
      let mark = ink(h, 1.0, dim);
      let morph = theme::anim_bool(ui.ctx(), "np-play-morph", app.playing() || app.buffering, 0.18);
      if app.buffering {
-@@ -1064,7 +1477,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1064,7 +1483,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
          app.toggle();
      }
      let (r, h, p) = btn(ui, 3, "next", "Next", enabled);
@@ -6342,7 +6392,7 @@ index 28fc376..b2d6299 100644
      if r.clicked() && enabled {
          app.next();
      }
-@@ -1076,8 +1489,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1076,8 +1495,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
      let looping = app.queue.repeat != Repeat::Off;
      let (r, h, p) = btn(ui, 4, "repeat", repeat_name, true);
      let ron = theme::anim_bool(ui.ctx(), r.id.with("on"), looping, 0.25);
@@ -6353,7 +6403,7 @@ index 28fc376..b2d6299 100644
      if r.clicked() {
          app.queue.repeat = match app.queue.repeat {
              Repeat::Off => Repeat::All,
-@@ -1085,6 +1498,171 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
+@@ -1085,6 +1504,171 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
              Repeat::One => Repeat::Off,
          };
      }
@@ -6525,7 +6575,7 @@ index 28fc376..b2d6299 100644
  }
  
  /// The Best Part mark: the music note the button has always carried, with the skip mark
-@@ -1267,7 +1845,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
+@@ -1267,7 +1851,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
  fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics, surface: karaoke::Surface) {
      let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
      let scroll_id = match surface { karaoke::Surface::Player => "plain-lyrics", karaoke::Surface::Sidebar => "sidebar-plain-lyrics" };
@@ -6534,7 +6584,7 @@ index 28fc376..b2d6299 100644
          ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::text_faint()));
          ui.add_space(14.0);
          let style = &app.look().lyrics;
-@@ -1317,7 +1895,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1317,7 +1901,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
          let below = (ui.ctx().content_rect().bottom() - resp.rect.bottom() - 20.0).max(160.0);
          let max_height = below.min((ui.ctx().content_rect().height() - frame_height - 16.0).max(1.0));
          ui.set_max_height(max_height);
@@ -6543,7 +6593,7 @@ index 28fc376..b2d6299 100644
              ui.add_space(4.0);
              if lyrics_shown(app, ui.ctx()) && app.lyrics.is_some() {
                  // First in the menu, so unfolding it only ever adds rows below the ⋯:
-@@ -1356,6 +1934,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1356,6 +1940,30 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
              if widgets::menu_action(ui, Some(icon::THUMBS_DOWN), "Dislike") {
                  app.actions.push(Action::Dislike(track.clone()));
              }
@@ -6574,7 +6624,7 @@ index 28fc376..b2d6299 100644
              // Both shares answer for the same song — its own address and a card of its
              // lyrics — so they sit in one section.
              menu_divider(ui);
-@@ -1373,6 +1975,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
+@@ -1373,6 +1981,21 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
      });
  }
  
