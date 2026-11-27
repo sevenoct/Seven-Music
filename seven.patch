@@ -1941,10 +1941,87 @@ index b0afd9a..7314d37 100644
                      status.seek_revision.fetch_add(1, Ordering::Release);
                      continue;
 diff --git a/src/backend.rs b/src/backend.rs
-index d672c59..e10c20f 100644
+index d672c59..db795c8 100644
 --- a/src/backend.rs
 +++ b/src/backend.rs
-@@ -1205,7 +1205,7 @@ impl Backend {
+@@ -199,6 +199,76 @@ impl Req {
+ }
+ 
+ /// Whether Google and Apple mean the same thing by these two names.
++/// A song's title without what follows its first bracket — "(feat. X)", "[Remastered]" —
++/// since a video's own title rarely carries it.
++fn bare_title(title: &str) -> &str {
++    let cut = title.find(['(', '[']).map_or(title, |at| &title[..at]).trim();
++    if cut.is_empty() { title.trim() } else { cut }
++}
++
++/// How well a youtube.com result is the music video of a song, or `None` when it is not one:
++/// someone else's cover, a live or slowed version, an auto-generated "Topic" upload (a still
++/// picture over the audio), a different song, or a clip whose length is nowhere near the
++/// song's. The official video outranks the lyric video and the audio upload, which are
++/// only taken when nothing better answered.
++fn clip_score(hit: &innertube::Hit, title: &str, artists: &[String], secs: Option<u32>) -> Option<i32> {
++    let want = crate::apple::norm(title);
++    let (name, channel) = (crate::apple::norm(&hit.title), crate::apple::norm(&hit.channel));
++    if want.is_empty() || !name.contains(want.as_str()) || hit.channel.trim_end().ends_with("- Topic") {
++        return None;
++    }
++    // Whole words only: "live" must not catch "Olivia" or "alive".
++    let padded = |s: &str| format!(" {} ", s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "));
++    let (lower, song) = (padded(&hit.title), padded(title));
++    let has = |text: &str, word: &str| text.contains(&format!(" {word} "));
++    // Versions that are not the song as released, unless the song's own title says so.
++    for word in ["cover", "karaoke", "reaction", "instrumental", "tutorial", "slowed", "sped up", "nightcore", "8d", "reverb", "remix", "live", "acoustic", "akustik", "mashup", "piano", "ukulele"] {
++        if has(&lower, word) && !has(&song, word) {
++            return None;
++        }
++    }
++    let named: Vec<String> = artists.iter().map(|a| crate::apple::norm(a)).filter(|a| a.len() > 1).collect();
++    let in_title = named.iter().any(|a| name.contains(a.as_str()));
++    let on_channel = named.iter().any(|a| channel.contains(a.as_str()) || (channel.len() > 2 && a.contains(channel.as_str())));
++    // A video that names none of the song's artists, on a channel that isn't theirs, is
++    // someone else's.
++    if !named.is_empty() && !in_title && !on_channel && !hit.artist_badge {
++        return None;
++    }
++    let mut score = 0;
++    if in_title {
++        score += 10;
++    }
++    if on_channel {
++        score += 20;
++    }
++    if hit.artist_badge {
++        score += 20;
++    }
++    if has(&lower, "official") {
++        score += 25;
++    }
++    if ["music video", "video clip", "videoclip", "official video", "klip", "mv"].iter().any(|w| has(&lower, w)) {
++        score += 30;
++    }
++    if ["lyric", "lyrics", "lirik", "visualizer", "visualiser", "audio", "full album"].iter().any(|w| has(&lower, w)) {
++        score -= 45;
++    }
++    // A clip runs a little over its song at most (an intro, a skit): far over or under is a
++    // different recording, a medley or a stream.
++    match (hit.secs, secs) {
++        (None, _) => return None,
++        (Some(clip), Some(song)) => {
++            if clip > song + 120 || clip + 30 < song {
++                return None;
++            }
++            score -= (clip.abs_diff(song) / 6) as i32;
++        }
++        _ => {}
++    }
++    Some(score)
++}
++
+ fn same_name(a: &str, b: &str) -> bool {
+     let (a, b) = (crate::apple::norm(a), crate::apple::norm(b));
+     !a.is_empty() && !b.is_empty() && (a == b || a.contains(&b) || b.contains(&a))
+@@ -1205,7 +1275,7 @@ impl Backend {
          let named = hits.iter().find(|t| t.music_video && ours(t) && t.title.to_lowercase().contains(&want)).cloned();
          let official = hits.iter().find(|t| t.music_video && ours(t)).cloned();
          let found = named.or(official).or_else(|| hits.into_iter().find(|t| ours(t)));
@@ -1953,7 +2030,7 @@ index d672c59..e10c20f 100644
      }
  
      /// The clip YouTube Music holds for a song that is not itself a video: the video
-@@ -1226,18 +1226,28 @@ impl Backend {
+@@ -1226,18 +1296,28 @@ impl Backend {
          {
              return Ok(paired);
          }
@@ -1992,7 +2069,73 @@ index d672c59..e10c20f 100644
      }
  
      /// The music-video player's picture for a song: the music video YouTube Music has of it — the
-@@ -1331,7 +1341,7 @@ impl Backend {
+@@ -1291,11 +1371,64 @@ impl Backend {
+         if let Some(id) = known {
+             return Ok(id);
+         }
+-        let id = self.video_for(track, me).await?.id;
++        // The clip comes from youtube.com itself: the artist's own upload is there even when
++        // YouTube Music doesn't list it as a music video. YouTube Music's copy is only the
++        // last resort, for a song youtube.com gave no usable clip of.
++        let id = match self.youtube_video(track).await {
++            Ok(Some(id)) => id,
++            found => {
++                match found {
++                    Err(e) => log::info!("music video for '{}': youtube.com search failed: {e:#}", track.title),
++                    _ => log::info!("music video for '{}': no match on youtube.com, trying YouTube Music", track.title),
++                }
++                self.video_for(track, me).await?.id
++            }
++        };
+         self.videos.lock().unwrap().insert(track.id.clone(), id.clone());
+         Ok(id)
+     }
+ 
++    /// The video youtube.com holds for a song: its search, artist first, scored by `clip_score`.
++    /// `Ok(None)` when it answered and nothing fit; an error only when every search failed,
++    /// so the caller knows a second try could still find one.
++    async fn youtube_video(&self, track: &Track) -> anyhow::Result<Option<String>> {
++        let title = bare_title(&track.title);
++        let artists: Vec<String> = track.artists.iter().map(|a| a.name.clone()).filter(|n| !n.trim().is_empty()).collect();
++        let lead = artists.first().cloned().unwrap_or_default();
++        let queries = [format!("{lead} {title} official music video"), format!("{lead} {title}")];
++        let (mut best, mut seen, mut answered): (Option<(i32, String)>, Vec<String>, bool) = (None, Vec::new(), false);
++        let mut failure = None;
++        for query in queries {
++            match innertube::search_videos(&self.http(), query.trim()).await {
++                Ok(hits) => {
++                    answered = true;
++                    for hit in hits.into_iter().take(15) {
++                        if seen.contains(&hit.id) {
++                            continue;
++                        }
++                        seen.push(hit.id.clone());
++                        if let Some(score) = clip_score(&hit, title, &artists, track.duration)
++                            && best.as_ref().is_none_or(|(b, _)| score > *b)
++                        {
++                            best = Some((score, hit.id));
++                        }
++                    }
++                    // An official video already in hand needs no second search.
++                    if best.as_ref().is_some_and(|(score, _)| *score >= 70) {
++                        break;
++                    }
++                }
++                Err(e) => failure = Some(e),
++            }
++        }
++        match (best, answered, failure) {
++            (Some((_, id)), _, _) => Ok(Some(id)),
++            (None, true, _) => Ok(None),
++            (None, false, Some(e)) => Err(e),
++            (None, false, None) => Ok(None),
++        }
++    }
++
+     /// What plays when an Apple tile is asked for as a queue: the songs YouTube Music
+     /// has of the release Apple names.
+     async fn apple_tracks(&self, kind: model::AppleKind, title: &str, artist: &str, me: bool) -> anyhow::Result<Vec<Track>> {
+@@ -1331,7 +1464,7 @@ impl Backend {
          let hits = ytm::search_tracks(&*self.api, &format!("{title} {artist}"), ytm::Filter::Songs, me).await?;
          let named = hits.iter().find(|t| same_name(&t.title, title) && near_artist(artist, &t.artist_line())).cloned();
          let titled = named.or_else(|| hits.iter().find(|t| same_name(&t.title, title)).cloned());
@@ -2001,7 +2144,7 @@ index d672c59..e10c20f 100644
      }
  
      /// YouTube Music's id for a release Apple names. Apple's playlists are curated under
-@@ -1346,7 +1356,7 @@ impl Backend {
+@@ -1346,7 +1479,7 @@ impl Backend {
          };
          let named = hits.iter().find(|c| same_name(&c.title, title) && (playlist || near_artist(artist, &c.subtitle))).and_then(pick);
          let titled = named.or_else(|| hits.iter().find(|c| same_name(&c.title, title)).and_then(pick));
@@ -2679,6 +2822,145 @@ index 00222bc..2787b9c 100644
                  }
                  anyhow::bail!("the addon refused the request (sign-in required)");
              }
+diff --git a/src/innertube.rs b/src/innertube.rs
+index bcb7bcd..d2ff07f 100644
+--- a/src/innertube.rs
++++ b/src/innertube.rs
+@@ -134,6 +134,107 @@ pub async fn web_next(http: &reqwest::Client, video_id: &str) -> anyhow::Result<
+     Err(last)
+ }
+ 
++/// One result of a youtube.com video search.
++#[derive(Clone, Debug)]
++pub struct Hit {
++    pub id: String,
++    pub title: String,
++    /// The channel that uploaded it.
++    pub channel: String,
++    /// Its length in seconds; `None` for a live stream, which has none.
++    pub secs: Option<u32>,
++    /// The channel wears YouTube's "official artist" badge.
++    pub artist_badge: bool,
++}
++
++/// A search of youtube.com itself (the plain site, not YouTube Music), videos only. A
++/// clip that YouTube Music doesn't list as a music video is still found here, and this is
++/// where an artist's own upload sits. Asked anonymously with the desktop client, like
++/// `web_next`, and retried once.
++pub async fn search_videos(http: &reqwest::Client, query: &str) -> anyhow::Result<Vec<Hit>> {
++    const VERSION: &str = "2.20260708.00.00";
++    const WEB_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
++    let body = json!({
++        "context": {"client": {"clientName": "WEB", "clientVersion": VERSION, "hl": "en", "gl": "US"}},
++        "query": query,
++        // The "Videos" filter of the site's own search page.
++        "params": "EgIQAQ==",
++    });
++    let mut last = anyhow::anyhow!("youtube.com sent no search answer for '{query}'");
++    for _ in 0..2 {
++        let res = async {
++            let resp = http
++                .post("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
++                .header("User-Agent", WEB_UA)
++                .header("Origin", "https://www.youtube.com")
++                .header("Referer", "https://www.youtube.com/")
++                .header("X-YouTube-Client-Name", "1")
++                .header("X-YouTube-Client-Version", VERSION)
++                .header("Accept-Language", "en-US,en")
++                .timeout(std::time::Duration::from_secs(10))
++                .json(&body)
++                .send()
++                .await?
++                .error_for_status()?;
++            Ok::<_, reqwest::Error>(resp.json::<Value>().await?)
++        }
++        .await;
++        match res {
++            Ok(v) => {
++                let mut hits = Vec::new();
++                collect_hits(&v, &mut hits);
++                return Ok(hits);
++            }
++            Err(e) => last = e.into(),
++        }
++    }
++    Err(last)
++}
++
++/// Every `videoRenderer` in a search answer, in the order YouTube ranks them. The answer's
++/// nesting changes from time to time, so the tree is walked rather than followed by path.
++fn collect_hits(v: &Value, out: &mut Vec<Hit>) {
++    match v {
++        Value::Object(map) => {
++            if let Some(hit) = map.get("videoRenderer").and_then(hit_of) {
++                out.push(hit);
++            }
++            for (key, child) in map {
++                if key != "videoRenderer" {
++                    collect_hits(child, out);
++                }
++            }
++        }
++        Value::Array(items) => items.iter().for_each(|c| collect_hits(c, out)),
++        _ => {}
++    }
++}
++
++fn runs_text(v: &Value) -> String {
++    match v["runs"].as_array() {
++        Some(runs) => runs.iter().filter_map(|r| r["text"].as_str()).collect(),
++        None => v["simpleText"].as_str().unwrap_or_default().to_owned(),
++    }
++}
++
++fn hit_of(r: &Value) -> Option<Hit> {
++    let id = r["videoId"].as_str().filter(|id| id.len() == 11)?.to_owned();
++    let channel = [&r["ownerText"], &r["longBylineText"], &r["shortBylineText"]].iter().map(|v| runs_text(v)).find(|t| !t.is_empty()).unwrap_or_default();
++    let artist_badge = r["ownerBadges"].as_array().is_some_and(|badges| badges.iter().any(|b| b["metadataBadgeRenderer"]["style"].as_str() == Some("BADGE_STYLE_TYPE_VERIFIED_ARTIST")));
++    Some(Hit { id, title: runs_text(&r["title"]), channel, secs: clock(&runs_text(&r["lengthText"])), artist_badge })
++}
++
++/// "4:19" or "1:02:03" as seconds.
++fn clock(s: &str) -> Option<u32> {
++    let mut total = 0u32;
++    let mut parts = 0;
++    for part in s.trim().split(':') {
++        total = total.checked_mul(60)?.checked_add(part.trim().parse::<u32>().ok()?)?;
++        parts += 1;
++    }
++    (parts > 0 && total > 0).then_some(total)
++}
++
+ /// The picture to play over the sound: one of the video-only itags, which carry no audio
+ /// of their own, so the song keeps playing from `audio_stream`.
+ #[derive(Clone)]
+@@ -500,3 +601,26 @@ mod format_probe {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod search_parse {
++    #[test]
++    fn reads_a_search_answer() {
++        let answer = serde_json::json!({"contents": {"twoColumnSearchResultsRenderer": {"primaryContents": {"sectionListRenderer": {"contents": [{"itemSectionRenderer": {"contents": [
++            {"videoRenderer": {"videoId": "abcdefghijk", "title": {"runs": [{"text": "Maell Lee - Keadaanku Di Bumi "}, {"text": "(Official Music Video)"}]},
++              "ownerText": {"runs": [{"text": "Maell Lee"}]}, "lengthText": {"simpleText": "4:19"},
++              "ownerBadges": [{"metadataBadgeRenderer": {"style": "BADGE_STYLE_TYPE_VERIFIED_ARTIST"}}]}},
++            {"videoRenderer": {"videoId": "short", "title": {"runs": []}}}
++        ]}}]}}}}});
++        let mut hits = Vec::new();
++        super::collect_hits(&answer, &mut hits);
++        assert_eq!(hits.len(), 1);
++        assert_eq!(hits[0].id, "abcdefghijk");
++        assert_eq!(hits[0].title, "Maell Lee - Keadaanku Di Bumi (Official Music Video)");
++        assert_eq!(hits[0].channel, "Maell Lee");
++        assert_eq!(hits[0].secs, Some(259));
++        assert!(hits[0].artist_badge);
++        assert_eq!(super::clock("1:02:03"), Some(3723));
++        assert_eq!(super::clock(""), None);
++    }
++}
 diff --git a/src/login.rs b/src/login.rs
 index c100c60..b75dc27 100644
 --- a/src/login.rs
@@ -3851,10 +4133,10 @@ index 420d560..610a67f 100644
              ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 diff --git a/src/ui/fx.rs b/src/ui/fx.rs
 new file mode 100644
-index 0000000..23728e7
+index 0000000..af33f3e
 --- /dev/null
 +++ b/src/ui/fx.rs
-@@ -0,0 +1,616 @@
+@@ -0,0 +1,679 @@
 +//! Small effects borrowed from Mochy Music: the wavy seek line, the like burst, the press
 +//! bounce, the visualizer beside the player, the staggered entrance of cards and the
 +//! greeting on Home. Everything is drawn with the painter calls the rest of the app
@@ -4373,22 +4655,85 @@ index 0000000..23728e7
 +    } else if let Some(url) = app.account_avatar.as_ref().filter(|a| !a.is_empty()) {
 +        widgets::paint_remote(ui, url, rect, r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
 +    } else {
-+        // Signed out and no photo: a plain head and shoulders on a dark disc.
++        // Signed out and no photo: the very icon the Account group wears in Settings,
++        // on the same round tile (the glyph is 15 pt in a 28 pt tile there).
 +        let (c, w) = (rect.center(), rect.width());
-+        let light = theme::light();
-+        ui.painter().circle_filled(c, r, if light { Color32::from_black_alpha(20) } else { Color32::from_white_alpha(22) });
-+        let ink = if light { Color32::from_black_alpha(130) } else { Color32::from_white_alpha(170) };
-+        ui.painter().circle_filled(c + vec2(0.0, -0.11 * w), 0.16 * w, ink);
-+        let base = c + vec2(0.0, 0.42 * w);
-+        let shoulders: Vec<egui::Pos2> = (0..=16)
-+            .map(|i| {
-+                let a = std::f32::consts::PI * (1.0 + i as f32 / 16.0);
-+                base + vec2(0.27 * w * a.cos(), 0.26 * w * a.sin())
-+            })
-+            .collect();
-+        ui.painter().add(egui::Shape::convex_polygon(shoulders, ink, egui::Stroke::NONE));
++        ui.painter().circle_filled(c, r, theme::glass(0.09));
++        widgets::icon_at(ui, c, theme::icon::CIRCLE_USER, w * 15.0 / 28.0, theme::text());
 +    }
 +    ui.painter().circle_stroke(rect.center(), r - 0.5, egui::Stroke::new(1.0, Color32::from_white_alpha(34)));
++}
++
++/// Discord's controller-head mark in the same line style as the Lucide icons beside it:
++/// a thin outline, two filled eyes and a smile. `width` is the mark's width in points.
++/// Lucide has no brand marks, so the outline is drawn here from the real logo's proportions.
++pub fn discord_mark(p: &egui::Painter, c: Pos2, width: f32, ink: Color32) {
++    // The silhouette, clockwise from the top-left, in the logo's own pixel grid (570 wide),
++    // with the corner radius each vertex is rounded by.
++    const SIL: [(f32, f32, f32); 19] = [
++        (160.0, 186.0, 10.0),
++        (277.0, 150.0, 3.0),
++        (293.0, 180.0, 3.0),
++        (425.0, 180.0, 3.0),
++        (438.0, 150.0, 3.0),
++        (556.0, 186.0, 10.0),
++        (604.0, 262.0, 40.0),
++        (632.0, 352.0, 40.0),
++        (642.0, 440.0, 40.0),
++        (642.0, 510.0, 16.0),
++        (498.0, 583.0, 6.0),
++        (466.0, 534.0, 6.0),
++        (360.0, 548.0, 0.0),
++        (250.0, 534.0, 6.0),
++        (220.0, 583.0, 6.0),
++        (72.0, 510.0, 16.0),
++        (72.0, 440.0, 40.0),
++        (82.0, 352.0, 40.0),
++        (110.0, 262.0, 40.0),
++    ];
++    let k = width / 570.0;
++    let at = |x: f32, y: f32| pos2(c.x + (x - 357.0) * k, c.y + (y - 372.0) * k);
++    let n = SIL.len();
++    let mut outline: Vec<Pos2> = Vec::new();
++    for i in 0..n {
++        let (x, y, r) = SIL[i];
++        if r <= 0.0 {
++            outline.push(at(x, y));
++            continue;
++        }
++        let (ax, ay, _) = SIL[(i + n - 1) % n];
++        let (bx, by, _) = SIL[(i + 1) % n];
++        // The point `r` along the edge towards a neighbour, never more than 45% of it.
++        let toward = |qx: f32, qy: f32| {
++            let (dx, dy) = (qx - x, qy - y);
++            let len = (dx * dx + dy * dy).sqrt().max(1e-3);
++            let t = r.min(len * 0.45) / len;
++            (x + dx * t, y + dy * t)
++        };
++        let (sx, sy) = toward(ax, ay);
++        let (ex, ey) = toward(bx, by);
++        for j in 0..=6 {
++            let t = j as f32 / 6.0;
++            let u = 1.0 - t;
++            outline.push(at(u * u * sx + 2.0 * u * t * x + t * t * ex, u * u * sy + 2.0 * u * t * y + t * t * ey));
++        }
++    }
++    let stroke = egui::Stroke::new((width * 0.076).max(1.0), ink);
++    p.add(egui::Shape::closed_line(outline, stroke));
++    for cx in [263.0_f32, 452.0] {
++        let eye: Vec<Pos2> = (0..24)
++            .map(|i| {
++                let a = std::f32::consts::TAU * i as f32 / 24.0;
++                at(cx + 40.0 * a.cos(), 392.0 + 48.0 * a.sin())
++            })
++            .collect();
++        p.add(egui::Shape::convex_polygon(eye, ink, egui::Stroke::NONE));
++    }
++    let smile: Vec<Pos2> = [(222.0, 478.0), (260.0, 492.0), (310.0, 502.0), (360.0, 505.0), (410.0, 502.0), (460.0, 492.0), (498.0, 478.0)]
++        .iter()
++        .map(|&(x, y)| at(x, y))
++        .collect();
++    p.add(egui::Shape::line(smile, stroke));
 +}
 +
 +// ------------------------------------------------------------------ pinned heads
@@ -7833,7 +8178,7 @@ index 0000000..93d9cac
 +    }
 +}
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7..a851ee2 100644
+index 899a3c7..6c84282 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
 @@ -65,18 +65,38 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
@@ -8711,7 +9056,7 @@ index 899a3c7..a851ee2 100644
  /// A dropdown's closed state: the chosen value and a chevron on a glass pill.
  pub(super) fn dropdown_button(ui: &mut Ui, value: &str, width: f32, name: &str) -> egui::Response {
      let (rect, resp) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
-@@ -3993,15 +4494,55 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
+@@ -3993,15 +4494,61 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
      if !s.shown {
          return;
      }
@@ -8728,6 +9073,12 @@ index 899a3c7..a851ee2 100644
 +        ui.painter().circle_filled(c, 14.0, theme::glass(0.09));
 +        ui.painter().circle_stroke(c, 7.5, egui::Stroke::new(1.5, theme::text()));
 +        ui.painter().text(c + vec2(0.0, 0.5), Align2::CENTER_CENTER, "i", theme::bold(11.0), theme::text());
++        tx = rect.left() + 38.0;
++    } else if title == "Discord" || title == "Discord card" {
++        // Discord's own mark, drawn in the same line style as the other group icons.
++        let c = pos2(rect.left() + 14.0, rect.center().y);
++        ui.painter().circle_filled(c, 14.0, theme::glass(0.09));
++        super::fx::discord_mark(ui.painter(), c, 16.5, theme::text());
 +        tx = rect.left() + 38.0;
 +    } else if let Some(g) = section_icon(title) {
 +        let c = pos2(rect.left() + 14.0, rect.center().y);
