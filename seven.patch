@@ -1941,7 +1941,7 @@ index b0afd9a..7314d37 100644
                      status.seek_revision.fetch_add(1, Ordering::Release);
                      continue;
 diff --git a/src/backend.rs b/src/backend.rs
-index d672c59..f8a1d8d 100644
+index d672c59..1409ce9 100644
 --- a/src/backend.rs
 +++ b/src/backend.rs
 @@ -199,6 +199,76 @@ impl Req {
@@ -2056,7 +2056,7 @@ index d672c59..f8a1d8d 100644
 +        let titled = |t: &Track| {
 +            if !(t.music_video && ours(t) && !want.is_empty()) {
 +                return false;
-             }
++            }
 +            let has = crate::apple::norm(&t.title);
 +            has.contains(want.as_str()) || (core.len() >= 3 && has.contains(core.as_str()))
 +        };
@@ -2080,7 +2080,7 @@ index d672c59..f8a1d8d 100644
 +            Some(()) => {
 +                log::info!("music video for '{}': nothing matched; looked at: {}", track.title, seen.join(" | "));
 +                Err(anyhow::anyhow!("No music video of {} was found", track.title))
-+            }
+             }
 +            None => Err(anyhow::anyhow!("The search for a music video of {} failed", track.title)),
          }
      }
@@ -2169,6 +2169,35 @@ index d672c59..f8a1d8d 100644
      }
  
      /// Saved playlists and albums.
+@@ -1899,12 +2049,23 @@ impl Backend {
+                     Ok(s) => Ok((Source::WebMusic, s)),
+                     Err(web) => {
+                         log::warn!("{video_id}: the web player refused too ({web:#})");
+-                        if self.api.account().is_some()
+-                            && let Ok(s) = self.resolve_from(Source::YtDlp, video_id, stream::Format::Aac, None).await
+-                        {
+-                            return Ok((Source::YtDlp, s));
++                        // What each last resort said, so the notice can tell the real
++                        // reason instead of the anonymous player's "please sign in".
++                        let short = |e: &anyhow::Error| {
++                            let line = format!("{e:#}").lines().next().unwrap_or("").trim().to_owned();
++                            if line.chars().count() > 90 { format!("{}…", line.chars().take(90).collect::<String>()) } else { line }
++                        };
++                        let mut tried = format!("web player: {}", short(&web));
++                        if self.api.account().is_some() {
++                            match self.resolve_from(Source::YtDlp, video_id, stream::Format::Aac, None).await {
++                                Ok(s) => return Ok((Source::YtDlp, s)),
++                                Err(e) => {
++                                    log::warn!("{video_id}: yt-dlp failed too ({e:#})");
++                                    tried.push_str(&format!("; yt-dlp: {}", short(&e)));
++                                }
++                            }
+                         }
+-                        Err(first)
++                        Err(anyhow::anyhow!("{first:#} ({tried})"))
+                     }
+                 }
+             }
 diff --git a/src/cache.rs b/src/cache.rs
 new file mode 100644
 index 0000000..d22cb1e
@@ -3140,7 +3169,7 @@ index e5eced3..3b8d33c 100644
              .map_err(|e| log::warn!("media controls unavailable: {e:?}"))
              .ok()?;
 diff --git a/src/motion.rs b/src/motion.rs
-index f3ff29b..7b8bcb6 100644
+index f3ff29b..12cf252 100644
 --- a/src/motion.rs
 +++ b/src/motion.rs
 @@ -6,6 +6,7 @@
@@ -3245,7 +3274,7 @@ index f3ff29b..7b8bcb6 100644
              if let Some(path) = save_hls(&id, master, max_width) {
                  decode(&this, &path.to_string_lossy(), &ctx, max_width, at);
              }
-@@ -161,6 +207,272 @@ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, m
+@@ -161,6 +207,302 @@ pub fn play_video(ctx: &egui::Context, id: &str, url: &str, hls: Option<&str>, m
      motion
  }
  
@@ -3255,24 +3284,123 @@ index f3ff29b..7b8bcb6 100644
 +    (std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 1024).then_some(path)
 +}
 +
-+/// How much of the front of a clip the relay keeps in hand: its header, with the edit list
-+/// that Media Foundation's demuxer chokes on already zeroed, served from memory.
++/// How much of the front of a clip is looked through for the edit list that Media
++/// Foundation's demuxer chokes on, which is zeroed in memory before anything is served.
 +const HEAD: usize = 64 * 1024;
-+/// How much of the clip one request upstream asks for. Short pieces keep a paused player
-+/// from holding a long connection open, and a stall costs one piece, not the clip.
-+const PIECE: u64 = 1024 * 1024;
 +/// How long a stream may go without giving a picture before it is given up on.
 +const FIRST_FRAME: Duration = Duration::from_secs(25);
++/// The largest clip held in memory for a stream.
++const MAX_CLIP: u64 = 300 * 1024 * 1024;
 +
-+/// What the relay serves: the clip's address, its size, and its patched front.
++/// The clip as it comes down: held in memory only, never written to disk. The decoder is
++/// served from it while it is still arriving, as a browser plays a video it is loading.
++struct Fill {
++    data: Vec<u8>,
++    /// The front has been looked through and its edit list zeroed: nothing is served before.
++    patched: bool,
++    /// The download has ended, whole or not.
++    done: bool,
++    failed: bool,
++}
++
++struct Buf {
++    state: Mutex<Fill>,
++    more: std::sync::Condvar,
++}
++
++/// What the relay serves: the clip's size and the memory it is arriving in.
 +struct Clip {
-+    url: String,
 +    total: u64,
-+    head: Vec<u8>,
-+    /// One runtime for every connection the decoder opens: the pieces come down through a
-+    /// single pool of upstream connections, and the next piece is fetched while the last
-+    /// one is still being written.
-+    rt: tokio::runtime::Runtime,
++    buf: Arc<Buf>,
++}
++
++/// The last clips streamed, by address, so a restart or a replay of the same clip is
++/// served from memory at once. Session only; nothing here is on disk.
++static HELD: LazyLock<Mutex<Vec<(String, u64, Arc<Buf>)>>> = LazyLock::new(Default::default);
++
++/// Zero the delay of the edit list in the header, as `zero_the_edit_list` does for a file.
++fn patch_head(data: &mut [u8]) {
++    let n = data.len().min(HEAD);
++    let mut times = Vec::new();
++    edit_times(&data[..n], 0, n, &mut times);
++    for (at, width) in times {
++        if let Some(bytes) = data.get_mut(at..at + width) {
++            bytes.fill(0);
++        }
++    }
++}
++
++/// The clip for `url` already in memory, or one request for it, whole, with its download
++/// running on a background thread. `None` when the address won't answer.
++fn start_fill(url: &str) -> Option<(u64, Arc<Buf>)> {
++    if let Ok(held) = HELD.lock()
++        && let Some((_, total, buf)) = held.iter().find(|(u, _, b)| u == url && b.state.lock().is_ok_and(|s| !s.failed))
++    {
++        return Some((*total, buf.clone()));
++    }
++    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
++    let resp = rt
++        .block_on(async {
++            crate::proxy::http()
++                .get(url)
++                .header("User-Agent", crate::innertube::UA)
++                .timeout(Duration::from_secs(600))
++                .send()
++                .await
++        })
++        .map_err(|e| log::info!("video: the clip's first answer wouldn't come ({e})"))
++        .ok()?
++        .error_for_status()
++        .map_err(|e| log::info!("video: the clip's address was refused ({e})"))
++        .ok()?;
++    let total = resp.content_length().filter(|n| *n > 1024 && *n <= MAX_CLIP)?;
++    let buf = Arc::new(Buf {
++        state: Mutex::new(Fill { data: Vec::with_capacity(total as usize), patched: false, done: false, failed: false }),
++        more: std::sync::Condvar::new(),
++    });
++    let filling = buf.clone();
++    std::thread::Builder::new().name("video-fill".into()).spawn(move || fill(rt, resp, filling, total)).ok()?;
++    if let Ok(mut held) = HELD.lock() {
++        held.push((url.to_owned(), total, buf.clone()));
++        if held.len() > 2 {
++            held.remove(0);
++        }
++    }
++    Some((total, buf))
++}
++
++/// Pulls the clip down into memory, waking whoever waits for bytes as each piece lands.
++fn fill(rt: tokio::runtime::Runtime, mut resp: reqwest::Response, buf: Arc<Buf>, total: u64) {
++    rt.block_on(async {
++        loop {
++            match resp.chunk().await {
++                Ok(Some(chunk)) => {
++                    if let Ok(mut st) = buf.state.lock() {
++                        st.data.extend_from_slice(&chunk);
++                        if !st.patched && st.data.len() >= HEAD {
++                            patch_head(&mut st.data);
++                            st.patched = true;
++                        }
++                    }
++                    buf.more.notify_all();
++                }
++                Ok(None) => break,
++                Err(e) => {
++                    log::info!("video: the clip stopped coming down ({e})");
++                    break;
++                }
++            }
++        }
++    });
++    if let Ok(mut st) = buf.state.lock() {
++        if !st.patched {
++            patch_head(&mut st.data);
++            st.patched = true;
++        }
++        st.done = true;
++        st.failed = (st.data.len() as u64) < total;
++    }
++    buf.more.notify_all();
 +}
 +
 +/// Starts a loopback server for the clip at `url` and hands back the address to decode
@@ -3281,20 +3409,11 @@ index f3ff29b..7b8bcb6 100644
 +/// server instead, and the server asks YouTube as the app's client, a piece at a time.
 +/// Nothing is kept on disk. `None` when the first piece won't come: the caller falls back.
 +fn relay(motion: &Arc<Motion>, url: &str) -> Option<(String, Arc<AtomicBool>)> {
-+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().ok()?;
-+    let (total, mut head) = rt.block_on(probe(url))?;
-+    // Zero the delay of the edit list in the header, as `zero_the_edit_list` does for a file.
-+    let mut times = Vec::new();
-+    edit_times(&head, 0, head.len(), &mut times);
-+    for (at, width) in times {
-+        if let Some(bytes) = head.get_mut(at..at + width) {
-+            bytes.fill(0);
-+        }
-+    }
++    let (total, buf) = start_fill(url)?;
 +    let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
 +    let port = listener.local_addr().ok()?.port();
 +    let close = Arc::new(AtomicBool::new(false));
-+    let clip = Arc::new(Clip { url: url.to_owned(), total, head, rt });
++    let clip = Arc::new(Clip { total, buf });
 +    {
 +        let (clip, stop, close) = (clip.clone(), motion.stop.clone(), close.clone());
 +        std::thread::Builder::new().name("video-relay".into()).spawn(move || accept(listener, clip, stop, close)).ok()?;
@@ -3322,62 +3441,6 @@ index f3ff29b..7b8bcb6 100644
 +    }
 +    log::info!("video: streaming {:.1} MB clip through 127.0.0.1:{port}", total as f64 / 1_048_576.0);
 +    Some((format!("http://127.0.0.1:{port}/clip.mp4"), close))
-+}
-+
-+/// The clip's size and its first bytes, from one ranged request. A server that answers
-+/// the whole file instead of the range can't be streamed from, and is refused.
-+async fn probe(url: &str) -> Option<(u64, Vec<u8>)> {
-+    let mut resp = crate::proxy::http()
-+        .get(url)
-+        .header("User-Agent", crate::innertube::UA)
-+        .header("Range", format!("bytes=0-{}", HEAD - 1))
-+        .timeout(Duration::from_secs(20))
-+        .send()
-+        .await
-+        .map_err(|e| log::info!("video: the clip's first piece wouldn't come ({e})"))
-+        .ok()?;
-+    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-+        log::info!("video: the clip's server answered {} to a ranged request", resp.status());
-+        return None;
-+    }
-+    let total = resp
-+        .headers()
-+        .get(reqwest::header::CONTENT_RANGE)
-+        .and_then(|v| v.to_str().ok())
-+        .and_then(|v| v.rsplit('/').next())
-+        .and_then(|n| n.trim().parse::<u64>().ok())
-+        .filter(|n| *n > 1024)?;
-+    let mut head = Vec::with_capacity(HEAD);
-+    while head.len() < HEAD {
-+        match resp.chunk().await.ok()? {
-+            Some(chunk) => head.extend_from_slice(&chunk),
-+            None => break,
-+        }
-+    }
-+    head.truncate(HEAD.min(total as usize));
-+    Some((total, head))
-+}
-+
-+/// One piece of the clip, `from` to `to` inclusive, all of it or nothing.
-+async fn piece(url: &str, from: u64, to: u64) -> Option<Vec<u8>> {
-+    for _ in 0..2 {
-+        let sent = crate::proxy::http()
-+            .get(url)
-+            .header("User-Agent", crate::innertube::UA)
-+            .header("Range", format!("bytes={from}-{to}"))
-+            .timeout(Duration::from_secs(30))
-+            .send()
-+            .await;
-+        if let Ok(resp) = sent
-+            && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT
-+            && let Ok(bytes) = resp.bytes().await
-+            && bytes.len() as u64 == to - from + 1
-+        {
-+            return Some(bytes.to_vec());
-+        }
-+    }
-+    log::info!("video: the piece {from}-{to} wouldn't come");
-+    None
 +}
 +
 +/// Takes connections until the view is gone or the relay is closed. Each gets a thread:
@@ -3482,35 +3545,31 @@ index f3ff29b..7b8bcb6 100644
 +            continue;
 +        }
 +        let mut pos = start;
-+        // The front comes from memory, with its edit list already zeroed.
-+        let held = clip.head.len() as u64;
-+        if pos < held {
-+            let upto = (end + 1).min(held);
-+            if out.write_all(&clip.head[pos as usize..upto as usize]).is_err() {
-+                return;
-+            }
-+            pos = upto;
-+        }
-+        let fetch = |from: u64, to: u64| {
-+            let url = clip.url.clone();
-+            clip.rt.spawn(async move { piece(&url, from, to).await })
-+        };
-+        let mut ahead: Option<tokio::task::JoinHandle<Option<Vec<u8>>>> = None;
 +        while pos <= end {
-+            if stop.load(Ordering::Relaxed) || close.load(Ordering::Relaxed) {
-+                return;
-+            }
-+            let to = end.min(pos + PIECE - 1);
-+            let this = ahead.take().unwrap_or_else(|| fetch(pos, to));
-+            // The next piece is already on its way while this one is written out.
-+            if to < end {
-+                ahead = Some(fetch(to + 1, end.min(to + PIECE)));
-+            }
-+            let Some(bytes) = clip.rt.block_on(this).ok().flatten() else { return };
++            // What has arrived of the range, waited for when it hasn't yet: the clip is
++            // coming down at full speed behind this, into memory.
++            let bytes: Vec<u8> = {
++                let Ok(mut st) = clip.buf.state.lock() else { return };
++                loop {
++                    if stop.load(Ordering::Relaxed) || close.load(Ordering::Relaxed) {
++                        return;
++                    }
++                    if (st.patched || st.done) && (pos as usize) < st.data.len() {
++                        let upto = ((end + 1) as usize).min(st.data.len()).min(pos as usize + 256 * 1024);
++                        break st.data[pos as usize..upto].to_vec();
++                    }
++                    if st.done {
++                        // Ended short of what was asked for: the decoder is told by the cut.
++                        return;
++                    }
++                    let Ok((guard, _)) = clip.buf.more.wait_timeout(st, Duration::from_millis(200)) else { return };
++                    st = guard;
++                }
++            };
 +            if out.write_all(&bytes).is_err() {
 +                return;
 +            }
-+            pos = to + 1;
++            pos += bytes.len() as u64;
 +        }
 +    }
 +}
@@ -3518,7 +3577,7 @@ index f3ff29b..7b8bcb6 100644
  /// Spotify's canvas: a short clip with no sound of its own, played over the sleeve and
  /// looping until the song changes. Its file is cached under the name Spotify gave it,
  /// which is no YouTube id, so it goes to a cache of its own.
-@@ -299,7 +611,7 @@ fn video_name(id: &str) -> Option<String> {
+@@ -299,7 +641,7 @@ fn video_name(id: &str) -> Option<String> {
  }
  
  /// Write the stream out, or find the copy an earlier watch left behind.
@@ -3527,7 +3586,7 @@ index f3ff29b..7b8bcb6 100644
      let name = video_name(id)?;
      let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
      rt.block_on(async {
-@@ -315,7 +627,10 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
+@@ -315,7 +657,10 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
              let mut resp = match crate::proxy::http()
                  .get(url)
                  .header("User-Agent", crate::innertube::UA)
@@ -3539,7 +3598,7 @@ index f3ff29b..7b8bcb6 100644
                  .send()
                  .await
              {
-@@ -332,6 +647,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
+@@ -332,6 +677,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
                  }
              };
              let mut total = 0u64;
@@ -3547,7 +3606,7 @@ index f3ff29b..7b8bcb6 100644
              loop {
                  match resp.chunk().await {
                      Ok(Some(chunk)) => {
-@@ -340,6 +656,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
+@@ -340,6 +686,7 @@ fn save(id: &str, url: &str) -> Option<PathBuf> {
                              break None;
                          }
                          total += chunk.len() as u64;
@@ -3555,7 +3614,7 @@ index f3ff29b..7b8bcb6 100644
                      }
                      Ok(None) => break Some(()),
                      Err(e) => {
-@@ -548,8 +865,8 @@ fn decode(motion: &Arc<Motion>, src: &str, ctx: &egui::Context, max_width: u32,
+@@ -548,8 +895,8 @@ fn decode(motion: &Arc<Motion>, src: &str, ctx: &egui::Context, max_width: u32,
          // Each pass plays the clip once; then it starts again from the top. The song,
          // though, only starts at `at` once.
          let mut at = at;
@@ -3566,7 +3625,7 @@ index f3ff29b..7b8bcb6 100644
                  break;
              }
          }
-@@ -559,7 +876,7 @@ fn decode(motion: &Arc<Motion>, src: &str, ctx: &egui::Context, max_width: u32,
+@@ -559,7 +906,7 @@ fn decode(motion: &Arc<Motion>, src: &str, ctx: &egui::Context, max_width: u32,
  }
  
  #[cfg(windows)]
@@ -3575,7 +3634,7 @@ index f3ff29b..7b8bcb6 100644
      use windows::Win32::Media::MediaFoundation::*;
      let played = unsafe {
          (|| -> windows::core::Result<bool> {
-@@ -607,11 +924,17 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
+@@ -607,11 +954,17 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
          // keyframe at or before the mark, and the frames between it and the mark are
          // decoded and dropped: a handful of them, rather than the clip's whole first half,
          // which is what made a video taken up mid-song stutter, fall behind and give up.
@@ -3594,7 +3653,7 @@ index f3ff29b..7b8bcb6 100644
              loop {
                  if motion.stop.load(Ordering::Relaxed) {
                      return Ok(false);
-@@ -622,7 +945,9 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
+@@ -622,7 +975,9 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
                  if flags & MF_SOURCE_READERF_ERROR.0 as u32 != 0 {
                      return Ok(false);
                  }
@@ -3605,7 +3664,7 @@ index f3ff29b..7b8bcb6 100644
                      break;
                  }
                  left -= 1;
-@@ -643,7 +968,10 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
+@@ -643,7 +998,10 @@ unsafe fn play_once(motion: &Motion, ctx: &egui::Context, url: windows::core::PC
              }
              // Paused with the song: no sample is taken until it moves again, and the clock
              // the frames are paced by gives the waiting back, so the picture holds its place.
@@ -3617,7 +3676,7 @@ index f3ff29b..7b8bcb6 100644
                  let waited = Instant::now();
                  while motion.pause.load(Ordering::Relaxed) && !motion.stop.load(Ordering::Relaxed) {
                      std::thread::sleep(Duration::from_millis(50));
-@@ -1176,3 +1504,18 @@ mod tests {
+@@ -1176,3 +1534,18 @@ mod tests {
          }
      }
  }
