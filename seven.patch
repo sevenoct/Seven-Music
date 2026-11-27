@@ -4522,7 +4522,7 @@ index 249fb6f..ab9e88e 100644
              && (sresp.clicked() || sresp.dragged())
          {
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..0ac172d 100644
+index 252e6b9..781f880 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,10 @@ mod backdrop;
@@ -4607,7 +4607,7 @@ index 252e6b9..0ac172d 100644
 +    /// Frame rate ceiling in frames a second; 0 = as fast as the screen refreshes.
 +    fps_cap: u32,
 +    /// When the last frame began (for the ceiling); not saved.
-+    last_frame: Option<std::time::Instant>,
++    fps_frame_start: Option<std::time::Instant>,
 +    /// Now Playing's flat background becomes a multi-colour gradient from the cover.
 +    np_gradient: bool,
 +    /// The Home carousel keeps its blurred-artwork ground; off, it wears the player's gradient.
@@ -4694,7 +4694,7 @@ index 252e6b9..0ac172d 100644
 +            clock_24h: get("clock_24h").is_none_or(|v| v == "1"),
 +            performance_mode: get("performance_mode").is_some_and(|v| v == "1"),
 +            fps_cap: get("fps_cap").and_then(|v| v.parse().ok()).filter(|v| FPS_CAP_CHOICES.iter().any(|(s, _)| s == v)).unwrap_or(0),
-+            last_frame: None,
++            fps_frame_start: None,
 +            idle_open: get("idle_open").and_then(|v| v.parse().ok()).filter(|v| IDLE_OPEN_CHOICES.iter().any(|(s, _)| s == v)).unwrap_or(60),
 +            np_gradient: get("np_gradient").is_none_or(|v| v == "1"),
 +            hero_blur: get("hero_blur").is_some_and(|v| v == "1"),
@@ -5202,11 +5202,11 @@ index 252e6b9..0ac172d 100644
 +    /// touched, and a hidden window isn't paced at all.
 +    fn limit_fps(&mut self) {
 +        if self.fps_cap == 0 || self.window.hidden() {
-+            self.last_frame = None;
++            self.fps_frame_start = None;
 +            return;
 +        }
 +        let period = Duration::from_secs_f64(1.0 / f64::from(self.fps_cap));
-+        if let Some(prev) = self.last_frame {
++        if let Some(prev) = self.fps_frame_start {
 +            let spent = prev.elapsed();
 +            // A millisecond short of the period: the sleep overshoots a little, and the
 +            // screen's own vsync supplies the rest.
@@ -5214,7 +5214,7 @@ index 252e6b9..0ac172d 100644
 +                std::thread::sleep(period - spent - Duration::from_millis(1));
 +            }
 +        }
-+        self.last_frame = Some(std::time::Instant::now());
++        self.fps_frame_start = Some(std::time::Instant::now());
 +    }
 +
 +    fn idle_open_player(&mut self, ctx: &egui::Context, now: f64) {
