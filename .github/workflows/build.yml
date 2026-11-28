@@ -98,3 +98,8 @@ jobs:
             --repo "$GITHUB_REPOSITORY" --title "Seven $GITHUB_REF_NAME" "${notes[@]}" \
             || gh release upload "$GITHUB_REF_NAME" Seven-windows.zip dist/Seven.exe \
             --repo "$GITHUB_REPOSITORY" --clobber
+          # A release made by hand on the site first keeps the text typed there: the notes
+          # file wins either way, so "What's new" is always what RELEASE_NOTES.md says.
+          if [ -f mine/RELEASE_NOTES.md ]; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file mine/RELEASE_NOTES.md
+          fi
