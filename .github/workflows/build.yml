@@ -1,1 +1,100 @@
+name: build
 
+on: push
+
+# A release needs to be allowed to write to the repository.
+permissions:
+  contents: write
+
+env:
+  PATCH: seven.patch
+  # The BitChord source this app is built from (commit 7ed3e48), kept in this repo as one zip
+  # so the build no longer depends on another repository staying online.
+  BASE: base-src.zip
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Disable CRLF conversion
+        run: git config --global core.autocrlf false
+
+      - name: Checkout this repository
+        uses: actions/checkout@v5
+        with:
+          path: mine
+
+      - name: Unpack the base source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path src | Out-Null
+          Expand-Archive -Path "mine/$env:BASE" -DestinationPath src -Force
+
+      - name: Apply patch
+        shell: bash
+        run: |
+          cd src
+          git init -q
+          git apply --whitespace=nowarn "../mine/$PATCH"
+
+      # The updater reads releases from the repository this runs in (the source says
+      # OWNER/REPO), and a tag such as v2.2.1 becomes the version the app reports, so the
+      # next tag is always newer than the copy it replaces.
+      - name: Point the updater here and take the version from the tag
+        shell: bash
+        run: |
+          cd src
+          sed -i "s#OWNER/REPO#${GITHUB_REPOSITORY}#g" src/update.rs
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF_NAME#v}"
+            sed -i "0,/^version = \"[^\"]*\"/s//version = \"$v\"/" Cargo.toml
+            sed -i '/^name = "bitchord"$/{n;s/^version = .*/version = "'"$v"'"/}' Cargo.lock
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+
+      - name: Build
+        working-directory: src
+        run: cargo build --release --locked
+
+      - name: Collect
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item src/target/release/bitchord.exe dist/Seven.exe
+          $dll = Get-ChildItem -Path src/target/release -Recurse -Filter WebView2Loader.dll -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+          if (-not $dll) {
+            $dll = Get-ChildItem -Path src/target/release -Recurse -Filter WebView2Loader.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if ($dll) { Copy-Item $dll.FullName dist/WebView2Loader.dll } else { Write-Warning "WebView2Loader.dll not found" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Seven-windows
+          path: dist/*
+
+      # Push a tag that starts with v (for example v1.0.0) and the build is also published as a
+      # GitHub release: Seven.exe on its own, and a zip with WebView2Loader.dll beside it.
+      - name: Zip for the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: Compress-Archive -Path dist/* -DestinationPath Seven-windows.zip -Force
+
+      # The release's notes are what the app shows as "What's new": RELEASE_NOTES.md from the
+      # repository when there is one, GitHub's own list of commits when there isn't.
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f mine/RELEASE_NOTES.md ]; then notes=(--notes-file mine/RELEASE_NOTES.md); else notes=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" Seven-windows.zip dist/Seven.exe \
+            --repo "$GITHUB_REPOSITORY" --title "Seven $GITHUB_REF_NAME" "${notes[@]}" \
+            || gh release upload "$GITHUB_REF_NAME" Seven-windows.zip dist/Seven.exe \
+            --repo "$GITHUB_REPOSITORY" --clobber
