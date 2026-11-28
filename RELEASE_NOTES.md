@@ -1,6 +1,7 @@
 ## What's new
 
-- The small note under the logo at the bottom left now shows the **version number**. Tap it to check for updates: it reads "Checking…", then the result (for example "Up to date") for a moment, then goes back to the version.
-- When a check finds a new version, whether it ran by itself or you tapped it, a **New version available** dialog opens with what's new and two buttons: **Update now** and **Later**. Update now installs it and restarts Seven as soon as it's downloaded.
-- After you update, a small **Updated to** card with what's new shows once on the first launch of the new version.
-- New **Auto updates** option in Settings › Updates. On by default. Seven downloads new versions as soon as it finds them; turn it off to download only when you press Update now.
+- The update dialog now shows a thin **progress bar** while a new version downloads, with the size next to it ("12 MB of 40 MB"). "Update available" under the logo also pulses gently, so it's easy to notice.
+- New **Version history** in Settings › Updates. One button shows the notes of the last few releases together, handy if you skipped some versions.
+- The playlists, albums, artists and songs pinned on the left rail can be **dragged to reorder**. Pick one up, drop it where you want it, and the order is kept.
+- Press **?** (or just the **/** key, no Shift needed) to see all the keyboard shortcuts on one glass card. It shows the keys you actually use, including any you changed.
+- When the internet comes back, **Home refreshes by itself**, and a page that failed to load during the outage loads again. The offline notice also has a **Retry** button.
