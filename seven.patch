@@ -9001,10 +9001,10 @@ index 0000000..80bdf75
 +}
 diff --git a/src/ui/tabbar.rs b/src/ui/tabbar.rs
 new file mode 100644
-index 0000000..9ce769a
+index 0000000..df3f5b1
 --- /dev/null
 +++ b/src/ui/tabbar.rs
-@@ -0,0 +1,465 @@
+@@ -0,0 +1,518 @@
 +//! The floating tab bar, after Mochy Music's Android navigation bar.
 +//!
 +//! A stadium of dark frosted glass hung above the player. One glyph per tab, outline
@@ -9125,11 +9125,13 @@ index 0000000..9ce769a
 +        .show(ctx, |ui| bar(app, ui, room));
 +    cards(app, ctx, pos2(at.x, bottom));
 +    logo(app, ctx, screen);
++    update_note(app, ctx, screen);
 +}
 +
 +/// The mark, flat at the window's bottom left beside the player; a tap opens Settings at its About Seven card.
 +fn logo(app: &mut App, ctx: &egui::Context, screen: Rect) {
-+    let cell = Rect::from_center_size(pos2(screen.left() + EDGE + W / 2.0, screen.bottom() - 46.0), vec2(W, 52.0));
++    // Raised a little: the update note stands under it.
++    let cell = Rect::from_center_size(pos2(screen.left() + EDGE + W / 2.0, screen.bottom() - 60.0), vec2(W, 40.0));
 +    egui::Area::new(egui::Id::new("tab-bar-logo-area")).fixed_pos(cell.min).order(egui::Order::Middle).show(ctx, |ui| {
 +        let (rect, resp) = ui.allocate_exact_size(cell.size(), Sense::click());
 +        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -9146,6 +9148,57 @@ index 0000000..9ce769a
 +            app.actions.push(Action::Go(Page::Settings));
 +        }
 +    });
++}
++
++/// Small print under the logo: where the update check has got to, and a tap that moves it
++/// on (check, check again, or restart once a new version is downloaded).
++fn update_note(app: &mut App, ctx: &egui::Context, screen: Rect) {
++    use crate::update::State;
++    let state = app.updater.as_ref().map_or(State::Idle, |u| u.state());
++    let (text, ready) = match &state {
++        State::Idle => ("Check for\nupdates".to_owned(), false),
++        State::Checking => ("Checking…".to_owned(), false),
++        State::UpToDate => ("Up to date".to_owned(), false),
++        State::Downloading { percent, .. } => (format!("Downloading\n{percent}%"), false),
++        State::Ready { .. } => ("Restart to\nupdate".to_owned(), true),
++        State::Failed(_) => ("Check failed\nTap to retry".to_owned(), false),
++    };
++    let cell = Rect::from_center_size(pos2(screen.left() + EDGE + W / 2.0, screen.bottom() - 26.0), vec2(W, 26.0));
++    let accent = app.accent_color();
++    let mut tapped = false;
++    egui::Area::new(egui::Id::new("tab-bar-update-area")).fixed_pos(cell.min).order(egui::Order::Middle).show(ctx, |ui| {
++        let (rect, resp) = ui.allocate_exact_size(cell.size(), Sense::click());
++        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
++        let glow = theme::anim_bool(ui.ctx(), "tab-bar-update-h", resp.hovered(), 0.15);
++        // Dark on light pages, white on dark ones, like the logo above.
++        let on_light = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("pages-light"))).unwrap_or(false);
++        let a = (140.0 + 90.0 * glow) as u8;
++        let ink = if ready {
++            accent
++        } else if on_light {
++            egui::Color32::from_black_alpha(a)
++        } else {
++            egui::Color32::from_white_alpha(a)
++        };
++        let lines: Vec<&str> = text.split('\n').collect();
++        let top = rect.center().y - (lines.len() as f32 - 1.0) * 5.5;
++        for (i, line) in lines.iter().enumerate() {
++            ui.painter().text(pos2(rect.center().x, top + 11.0 * i as f32), egui::Align2::CENTER_CENTER, *line, theme::semibold(9.5), ink);
++        }
++        tapped = resp.clicked();
++    });
++    if !tapped {
++        return;
++    }
++    match state {
++        State::Ready { .. } => app.restart_to_update(ctx),
++        State::Checking | State::Downloading { .. } => {}
++        _ => {
++            if let Some(u) = &app.updater {
++                u.check();
++            }
++        }
++    }
 +}
 +
 +/// What sat at the foot of the sidebar: the update card and the transfer's progress.
