@@ -4157,10 +4157,10 @@ index 288ad8c..d5a4093 100644
  
 diff --git a/src/ui/hero.rs b/src/ui/hero.rs
 new file mode 100644
-index 0000000..1903198
+index 0000000..9d7cb10
 --- /dev/null
 +++ b/src/ui/hero.rs
-@@ -0,0 +1,621 @@
+@@ -0,0 +1,631 @@
 +//! Home's lead carousel, after Mochy Music's home header.
 +//!
 +//! By default each slide stands on the same soft multi-colour gradient as the player (nine colours
@@ -4282,6 +4282,11 @@ index 0000000..1903198
 +    }
 +    lead.truncate(MAX_SLIDES);
 +    lead
++}
++
++/// The slide is for the song the player has loaded (playing or paused).
++fn on_the_loaded_song(app: &App, slide: &Slide) -> bool {
++    matches!(&slide.go, Go::Track(t) if app.current_id() == Some(t.id.as_str()))
 +}
 +
 +fn play_rect(card: Rect) -> Rect {
@@ -4627,11 +4632,14 @@ index 0000000..1903198
 +            layer(ui, card, &slides[prev], 1.0 - f, 0.0, end, blur);
 +        }
 +        layer(ui, card, &slides[idx], if prev == idx { 1.0 } else { f }, (1.0 - f) * 12.0, end, blur);
-+        // Play: a pill of frosted white, brighter under the pointer.
++        // Play: a pill of frosted white, brighter under the pointer. On the slide of the song
++        // that is already loaded it works the player: Pause while it plays, Play while it doesn't.
++        let running = on_the_loaded_song(app, &slides[idx]) && app.playing();
++        let (glyph, label) = if running { (icon::PAUSE, "Pause") } else { (icon::PLAY, "Play") };
 +        let p = ui.painter();
 +        p.rect_filled(play_v, 19.0, Color32::from_white_alpha((52.0 + 40.0 * ph) as u8));
-+        widgets::icon_at(ui, pos2(play_v.left() + 30.0, play_v.center().y), icon::PLAY, 16.0, Color32::WHITE);
-+        p.text(pos2(play_v.left() + 48.0, play_v.center().y), Align2::LEFT_CENTER, "Play", theme::semibold(15.0), Color32::WHITE);
++        widgets::icon_at(ui, pos2(play_v.left() + 30.0, play_v.center().y), glyph, 16.0, Color32::WHITE);
++        p.text(pos2(play_v.left() + 48.0, play_v.center().y), Align2::LEFT_CENTER, label, theme::semibold(15.0), Color32::WHITE);
 +        for (i, r, lit) in &dots {
 +            p.rect_filled(*r, 3.0, Color32::from_white_alpha((90.0 + 70.0 * lit) as u8));
 +            // The lit one fills from the left as the wait for the next slide runs out
@@ -4661,6 +4669,8 @@ index 0000000..1903198
 +    let s = &slides[idx];
 +    if play_resp.clicked() {
 +        app.actions.push(match &s.go {
++            // The song that is loaded is paused and resumed, not started over.
++            Go::Track(_) if on_the_loaded_song(app, s) => Action::TogglePlay,
 +            Go::Track(t) => Action::Play(vec![t.clone()], 0),
 +            Go::Collection(t) => Action::PlayCollection(t.clone(), false),
 +            Go::Open(t) => Action::Open(t.clone()),
@@ -5083,7 +5093,7 @@ index 249fb6f..adb0eef 100644
      }
  
 diff --git a/src/ui/mod.rs b/src/ui/mod.rs
-index 252e6b9..187a945 100644
+index 252e6b9..84f5ac2 100644
 --- a/src/ui/mod.rs
 +++ b/src/ui/mod.rs
 @@ -9,7 +9,10 @@ mod backdrop;
@@ -5234,18 +5244,7 @@ index 252e6b9..187a945 100644
          let app_icon = crate::appicon::load(backend.data_dir());
          let wgpu_renderer = crate::renderer::load(backend.data_dir()) == crate::renderer::Renderer::Wgpu;
          // Isolated dev profiles must not rewrite the user's Start menu shortcut.
-@@ -1341,7 +1422,9 @@ impl App {
-             whats_new: {
-                 let current = crate::update::current_version();
-                 let last = get("last_version");
--                (std::env::var_os("YTM_WHATS_NEW").is_some() || last.is_some_and(|v| crate::update::newer(&current, &v))).then_some(current)
-+                // No "what's new" card: its notes would come from BitChord's releases.
-+                let _ = (current, last);
-+                None::<String>
-             },
-             restart_for_update: false,
-             proxy_saved: crate::proxy::active().clone(),
-@@ -1356,6 +1439,7 @@ impl App {
+@@ -1356,6 +1437,7 @@ impl App {
              media_cover: Default::default(),
              radio_pending: false,
              seek_drag: None,
@@ -5253,7 +5252,7 @@ index 252e6b9..187a945 100644
              art_key: None,
              frost_art: None,
              page_art: None,
-@@ -1387,15 +1471,47 @@ impl App {
+@@ -1387,15 +1469,47 @@ impl App {
              disable_direct_stream,
              background_art: None,
              art_changed: -10.0,
@@ -5303,7 +5302,7 @@ index 252e6b9..187a945 100644
              animated_artwork: get("animated_artwork").is_some_and(|v| v == "1"),
              show_best_part: get("show_best_part").is_none_or(|v| v == "1"),
              show_volume: get("show_volume").is_none_or(|v| v == "1"),
-@@ -1431,6 +1547,7 @@ impl App {
+@@ -1431,6 +1545,7 @@ impl App {
              wheel_pending: egui::Vec2::ZERO,
              wheel_mods: egui::Modifiers::NONE,
              np_open: false,
@@ -5311,7 +5310,7 @@ index 252e6b9..187a945 100644
              np_tab: if get("np_art").is_some_and(|v| v == "1") { NpTab::Art } else { NpTab::Lyrics },
              queue_open: false,
              lyrics_open: false,
-@@ -1438,6 +1555,7 @@ impl App {
+@@ -1438,6 +1553,7 @@ impl App {
              fullscreen: false,
              video_on: false,
              video: Default::default(),
@@ -5319,7 +5318,7 @@ index 252e6b9..187a945 100644
              // Off unless asked for: a clip comes from Spotify, so the listener opts in.
              show_canvas: get("show_canvas").is_some_and(|v| v == "1"),
              show_past_lines: get("show_past_lines").is_none_or(|v| v == "1"),
-@@ -1600,6 +1718,213 @@ impl App {
+@@ -1600,6 +1716,213 @@ impl App {
          }
      }
  
@@ -5533,7 +5532,7 @@ index 252e6b9..187a945 100644
      fn nav_forward(&mut self) {
          if let Some(p) = self.forward.pop() {
              self.apple.clear();
-@@ -1817,7 +2142,7 @@ impl App {
+@@ -1817,7 +2140,7 @@ impl App {
          // With the icon tint off, a preset that borrows the cover's colour keeps the app's
          // own red instead; a preset that names its own colour is untouched by the switch.
          let untinted = !self.icon_tint && self.look().accent == "cover";
@@ -5542,7 +5541,7 @@ index 252e6b9..187a945 100644
          if theme::light() {
              // A pale cover colour would barely show on light pages: deepen it.
              let luma = 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
-@@ -1828,8 +2153,8 @@ impl App {
+@@ -1828,8 +2151,8 @@ impl App {
          c
      }
  
@@ -5553,7 +5552,7 @@ index 252e6b9..187a945 100644
      fn light_pages(&self, ctx: &egui::Context) -> bool {
          self.look().id == crate::preset::DEFAULT_ID && self.appearance.is_light(ctx)
      }
-@@ -1911,6 +2236,13 @@ impl App {
+@@ -1911,6 +2234,13 @@ impl App {
      }
  
      pub(crate) fn run_logic(&mut self, ctx: &egui::Context, now: f64, has_window: bool) {
@@ -5567,7 +5566,7 @@ index 252e6b9..187a945 100644
          let links = crate::deeplink::take();
          let reveal = crate::deeplink::take_show() || !links.is_empty();
          self.tray_window(ctx, reveal);
-@@ -1929,6 +2261,16 @@ impl App {
+@@ -1929,6 +2259,16 @@ impl App {
              m.set_playing(playing);
          }
          self.request_lyric_extras();
@@ -5584,7 +5583,7 @@ index 252e6b9..187a945 100644
          // Upload: files from the picker, or dropped onto the window.
          let mut files = self.picked_uploads.lock().unwrap().take().unwrap_or_default();
          files.extend(ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_owned()).filter(|p| !p.as_os_str().is_empty()).collect::<Vec<_>>()));
-@@ -1989,6 +2331,7 @@ impl App {
+@@ -1989,6 +2329,7 @@ impl App {
          }
          if has_window {
              fit_window_to_monitor(ctx);
@@ -5592,7 +5591,7 @@ index 252e6b9..187a945 100644
          }
          // Dev hook: YTM_MINI=<secs>[,<secs>…] switches between the mini player and the
          // full window at those times (YTM_MINI=1: the mini player after a second).
-@@ -2040,12 +2383,18 @@ impl App {
+@@ -2040,12 +2381,18 @@ impl App {
                  ctx.request_repaint_after(Duration::from_millis(250));
              }
          } else if self.np_open && playing && !self.mini.busy() {
@@ -5613,7 +5612,7 @@ index 252e6b9..187a945 100644
          } else if playing || self.buffering {
              ctx.request_repaint_after(Duration::from_millis(250));
          }
-@@ -2054,6 +2403,7 @@ impl App {
+@@ -2054,6 +2401,7 @@ impl App {
  
  impl eframe::App for App {
      fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -5621,7 +5620,7 @@ index 252e6b9..187a945 100644
          self.run_logic(ctx, ctx.input(|i| i.time), true);
      }
  
-@@ -2066,6 +2416,10 @@ impl eframe::App for App {
+@@ -2066,6 +2414,10 @@ impl eframe::App for App {
          let now = ctx.input(|i| i.time);
          let screen = ctx.content_rect();
  
@@ -5632,7 +5631,7 @@ index 252e6b9..187a945 100644
          self.sync_look();
          let look = self.look();
          // Now playing is dark; once it's most of the way up, so is the player bar under it.
-@@ -2096,7 +2450,9 @@ impl eframe::App for App {
+@@ -2096,7 +2448,9 @@ impl eframe::App for App {
          if dev_var("YTM_FULLSCREEN").and_then(|v| v.parse::<f64>().ok()).is_some_and(|t| now >= t) && !self.fullscreen {
              self.set_fullscreen(&ctx, true);
          }
@@ -5643,7 +5642,7 @@ index 252e6b9..187a945 100644
          theme::set_mode(&ctx, light);
          if self.chrome_applied.as_deref() != Some(look.id.as_str()) {
              self.apply_chrome(&ctx);
-@@ -2106,7 +2462,6 @@ impl eframe::App for App {
+@@ -2106,7 +2460,6 @@ impl eframe::App for App {
          // The full-screen player always keeps the sung lines: its sheet is the whole
          // picture, and the setting only trims the panels.
          ctx.data_mut(|d| d.insert_temp(egui::Id::unique("lyrics-past"), self.show_past_lines || self.fullscreen));
@@ -5651,7 +5650,7 @@ index 252e6b9..187a945 100644
          // Once now playing has slid all the way up it hides everything but the player
          // bar, so the pages and the full-screen background under it aren't drawn.
          let covered = !self.fullscreen && np >= 1.0;
-@@ -2140,32 +2495,16 @@ impl eframe::App for App {
+@@ -2140,32 +2493,16 @@ impl eframe::App for App {
                  .exact_size(self.bar_height())
                  .frame(egui::Frame::new())
                  .show_separator_line(false)
@@ -5692,7 +5691,7 @@ index 252e6b9..187a945 100644
              let section = ui.available_rect_before_wrap();
              let q = theme::anim_bool(&ctx, "queue-drawer", self.queue_open && !self.np_open, 0.25);
              if q > 0.01 {
-@@ -2188,11 +2527,13 @@ impl eframe::App for App {
+@@ -2188,11 +2525,13 @@ impl eframe::App for App {
              let main_right = ui.available_rect_before_wrap().right();
              egui::CentralPanel::default()
                  .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -5708,7 +5707,7 @@ index 252e6b9..187a945 100644
                      bottom: 0,
                  }))
                  .show(ui, |ui| {
-@@ -2208,9 +2549,17 @@ impl eframe::App for App {
+@@ -2208,9 +2547,17 @@ impl eframe::App for App {
                  .order(egui::Order::Middle)
                  .show(&ctx, |ui| {
                      ui.scope_builder(egui::UiBuilder::new().max_rect(strip).layout(egui::Layout::top_down(egui::Align::Min)), |ui| {
@@ -5726,7 +5725,7 @@ index 252e6b9..187a945 100644
          }
          if np > 0.001 {
              let pages = theme::set_mode(&ctx, false);
-@@ -2223,15 +2572,26 @@ impl eframe::App for App {
+@@ -2223,15 +2570,26 @@ impl eframe::App for App {
          notes::dialog(self, &ctx);
          if let Some(url) = self.share_pending.take() { ctx.copy_text(url); }
          shell::suggestions(self, &ctx);
@@ -5754,7 +5753,7 @@ index 252e6b9..187a945 100644
  
          if dev_var("YTM_THEME_TOUR").is_some() {
              self.theme_tour(&ctx, now);
-@@ -2392,7 +2752,26 @@ impl eframe::App for App {
+@@ -2392,7 +2750,26 @@ impl eframe::App for App {
              storage.set_string("font", theme::font_choice());
          }
          storage.set_string("anim_bg", b(self.anim_bg));
@@ -5781,7 +5780,7 @@ index 252e6b9..187a945 100644
          storage.set_string("reactive_bg", b(self.reactive_bg));
          storage.set_string("disable_blur", b(self.disable_blur));
          storage.set_string("animated_artwork", b(self.animated_artwork));
-@@ -2543,6 +2922,112 @@ struct PlayingAs {
+@@ -2543,6 +2920,112 @@ struct PlayingAs {
  }
  
  
@@ -5894,13 +5893,12 @@ index 252e6b9..187a945 100644
  /// A restored window size can exceed the monitor (e.g. saved after maximizing),
  /// leaving the player bar partly off-screen. Once at startup, maximize instead.
  fn fit_window_to_monitor(ctx: &egui::Context) {
-@@ -2639,7 +3124,8 @@ pub use crate::model::shuffle;
+@@ -2639,7 +3122,7 @@ pub use crate::model::shuffle;
  /// can't change while running, and the check touches the disk, so it runs once.
  fn updatable() -> bool {
      static UPDATABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 -    *UPDATABLE.get_or_init(|| crate::update::installed() || crate::update::portable_dir().is_some())
-+    // Seven has no release feed of its own yet: the checks (which read BitChord's) stay off.
-+    *UPDATABLE.get_or_init(|| false)
++    *UPDATABLE.get_or_init(|| crate::update::in_place() || crate::update::installed())
  }
  
  pub fn fmt_time(secs: u32) -> String {
@@ -7312,10 +7310,10 @@ index 0000000..93d9cac
 +    }
 +}
 diff --git a/src/ui/pages.rs b/src/ui/pages.rs
-index 899a3c7..6c84282 100644
+index 899a3c7..8ceef5a 100644
 --- a/src/ui/pages.rs
 +++ b/src/ui/pages.rs
-@@ -65,18 +65,38 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+@@ -65,18 +65,44 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
          ui.ctx().request_repaint();
      }
      ui.set_opacity(0.15 + 0.85 * t);
@@ -7343,6 +7341,12 @@ index 899a3c7..6c84282 100644
 +    if let Page::Search(q) = &page {
 +        search_head(app, ui, q);
 +    }
++    // Settings' title and its search box stand above the scroll too, so they stay put.
++    let panel_top = ui.cursor().top();
++    let settings_head_shown = page == Page::Settings && !app.jam_open;
++    if settings_head_shown {
++        settings_head(app, ui);
++    }
      let out = area.show(ui, |ui| {
          // The panel reaches the window's side so egui's own bar sits flush with it; the
          // content keeps its measured right edge instead of following the panel.
@@ -7355,7 +7359,7 @@ index 899a3c7..6c84282 100644
          match &page {
              Page::Home => home(app, ui, now),
              Page::New => new(app, ui, now),
-@@ -87,12 +107,42 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
+@@ -87,12 +113,44 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
              Page::Library(tab) => library(app, ui, *tab, now),
              Page::SeeAll => see_all(app, ui, now),
              Page::Downloads => downloads(app, ui, now),
@@ -7372,7 +7376,9 @@ index 899a3c7..6c84282 100644
 +    super::fx::pinned_head(app, ui, &page, out.inner_rect, out.state.clamped_offset().y);
 +    // Not on Search: its box and chips own that corner.
 +    if !matches!(page, Page::Search(_)) {
-+        super::fx::profile_button(app, ui, out.inner_rect);
++        // On Settings the portrait keeps the title's line, which is above the scroll.
++        let corner = if settings_head_shown { Rect::from_min_max(pos2(out.inner_rect.left(), panel_top), out.inner_rect.right_bottom()) } else { out.inner_rect };
++        super::fx::profile_button(app, ui, corner);
 +    }
 +    // Rows scrolling out of sight soften into the page's own ground at the edges: below
 +    // while there's more, above (on pages with no colour of their own up there) once
@@ -7399,7 +7405,7 @@ index 899a3c7..6c84282 100644
      selection_bar(app, ui.ctx(), &page, out.inner_rect);
      // Infinite scroll on home: fetch the next shelves when nearing the bottom.
      if page == Page::Home {
-@@ -770,12 +820,17 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
+@@ -770,12 +828,17 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
  // ------------------------------------------------------------------ home
  
  fn home(app: &mut App, ui: &mut Ui, now: f64) {
@@ -7418,7 +7424,7 @@ index 899a3c7..6c84282 100644
      // Apple's Home has no banner: its lead shelf is a run of portrait tiles, and every
      // shelf after it takes the shape its own cards ask for.
      let rows = Rows::new(app, now);
-@@ -1273,18 +1328,18 @@ pub(super) fn page_title(ui: &mut Ui, title: &str) {
+@@ -1273,18 +1336,18 @@ pub(super) fn page_title(ui: &mut Ui, title: &str) {
  
  // ------------------------------------------------------------------ search
  
@@ -7442,7 +7448,7 @@ index 899a3c7..6c84282 100644
      super::shell::search_field(app, ui, w);
      ui.add_space(8.0);
      ui.horizontal(|ui| {
-@@ -1296,6 +1351,11 @@ fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
+@@ -1296,6 +1359,11 @@ fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
              app.search_library_only = true;
          }
      });
@@ -7454,7 +7460,7 @@ index 899a3c7..6c84282 100644
  
      if app.search_library_only {
          let q_input = app.search_text.trim();
-@@ -1539,12 +1599,17 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
+@@ -1539,12 +1607,17 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
          app.backend.request(crate::backend::Req::PageArt { key: id.to_owned(), url: cover });
      }
      if held {
@@ -7476,7 +7482,7 @@ index 899a3c7..6c84282 100644
      }
      // The header's motion sleeve, asked for before the release is borrowed below.
      // Albums only: playlist covers stay still.
-@@ -1552,6 +1617,7 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
+@@ -1552,6 +1625,7 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
          Some(o) => (o.c.title.clone(), o.c.artists.first().map(|a| a.name.clone()).unwrap_or_else(|| o.c.byline())),
          None => (String::new(), String::new()),
      };
@@ -7484,7 +7490,7 @@ index 899a3c7..6c84282 100644
      // The header keeps its still sleeve: moving artwork belongs to the player.
      let sprite: Option<widgets::MotionSprite> = None;
      let accent = app.accent_color();
-@@ -2654,6 +2720,55 @@ fn downloads(app: &mut App, ui: &mut Ui, now: f64) {
+@@ -2654,6 +2728,55 @@ fn downloads(app: &mut App, ui: &mut Ui, now: f64) {
      list(ui, &rows, &app.liked, &songs, 0, &songs, true, false, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, collection: None, indices: None }, &mut app.actions);
  }
  
@@ -7540,10 +7546,35 @@ index 899a3c7..6c84282 100644
  // ------------------------------------------------------------------ settings
  
  /// What the box above Settings is looking for: the words typed in it, the group being
-@@ -2761,21 +2876,256 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
+@@ -2749,6 +2872,21 @@ fn settings(app: &mut App, ui: &mut Ui) {
+     put_search(ui, &SettingsSearch::default());
+ }
+ 
++/// The top of Settings, outside its scroll: the title and the box that filters the rows.
++/// It stands in the same centred column as the sections under it.
++fn settings_head(app: &mut App, ui: &mut Ui) {
++    let avail = (ui.available_width() - 48.0).max(0.0);
++    let w = avail.min(920.0);
++    ui.horizontal(|ui| {
++        ui.add_space(((avail - w) / 2.0).max(0.0));
++        ui.vertical(|ui| {
++            ui.set_width(w);
++            page_title(ui, "Settings");
++            settings_search_bar(ui, &mut app.settings_search);
++        });
++    });
++}
++
+ fn settings_body(app: &mut App, ui: &mut Ui) {
+     // A room opened from Listen together takes the column to itself, the way the site's
+     // settings drill in.
+@@ -2759,23 +2897,258 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
+         ui.add_space(40.0);
+         return;
      }
-     page_title(ui, "Settings");
-     settings_search_bar(ui, &mut app.settings_search);
+-    page_title(ui, "Settings");
+-    settings_search_bar(ui, &mut app.settings_search);
++    // The title and the search box are `settings_head`, above the scroll.
 +    // Account first, then the listener's card; every other group follows in alphabetical
 +    // order, and About Seven stays last.
      settings_account(app, ui);
@@ -7574,6 +7605,7 @@ index 899a3c7..6c84282 100644
 +    settings_artists(app, ui); // Signature
 +    settings_window(app, ui);
 +    settings_storage(app, ui);
++    settings_updates(app, ui);
 +    settings_credits(app, ui);
 +}
 +
@@ -7807,7 +7839,7 @@ index 899a3c7..6c84282 100644
  }
  
  /// The box above Settings: what's typed in it leaves only the sections and rows that say
-@@ -2829,7 +3179,7 @@ fn settings_account(app: &mut App, ui: &mut Ui) {
+@@ -2829,7 +3202,7 @@ fn settings_account(app: &mut App, ui: &mut Ui) {
      }
      settings_card(ui, |ui| {
          if app.logged_in {
@@ -7816,7 +7848,7 @@ index 899a3c7..6c84282 100644
              setting_row(ui, &name, Some("Signed in with Google. Your home feed, library and likes come from this account. Saved encrypted in Windows Credential Manager."), |ui| {
                  sign_out = pill(ui, "Sign out", Some(icon::LOG_OUT), false).clicked();
              });
-@@ -2887,7 +3237,7 @@ fn channel_picker(app: &mut App, ui: &mut Ui) {
+@@ -2887,7 +3260,7 @@ fn channel_picker(app: &mut App, ui: &mut Ui) {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(300.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -7825,7 +7857,7 @@ index 899a3c7..6c84282 100644
              ui.add_space(4.0);
              for c in list {
                  if option_row(ui, &label(c), c.page_id == *current).clicked() {
-@@ -2912,7 +3262,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
+@@ -2912,7 +3285,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.autoplay, "Autoplay");
          });
          divider(ui);
@@ -7834,7 +7866,7 @@ index 899a3c7..6c84282 100644
              if toggle(ui, &mut app.normalize, "Volume normalization").changed() {
                  app.audio.set_normalize(app.normalize);
              }
-@@ -2924,7 +3274,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
+@@ -2924,7 +3297,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
              }
          });
          divider(ui);
@@ -7843,7 +7875,7 @@ index 899a3c7..6c84282 100644
              toggle(ui, &mut app.play_songs, "Play songs, not music videos");
          });
          divider(ui);
-@@ -2936,7 +3286,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
+@@ -2936,7 +3309,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
              }
          });
          divider(ui);
@@ -7852,7 +7884,7 @@ index 899a3c7..6c84282 100644
              output_device_picker(app, ui);
          });
          divider(ui);
-@@ -2999,7 +3349,7 @@ fn settings_equalizer(app: &mut App, ui: &mut Ui) {
+@@ -2999,7 +3372,7 @@ fn settings_equalizer(app: &mut App, ui: &mut Ui) {
      section_label(ui, "Equalizer", None);
      ui.add_space(4.0);
      settings_card(ui, |ui| {
@@ -7861,7 +7893,7 @@ index 899a3c7..6c84282 100644
              if toggle(ui, &mut app.eq_on, "Equalizer").changed() {
                  app.set_eq();
              }
-@@ -3274,7 +3624,7 @@ fn settings_lyrics(app: &mut App, ui: &mut Ui) {
+@@ -3274,7 +3647,7 @@ fn settings_lyrics(app: &mut App, ui: &mut Ui) {
              egui::Popup::menu(&btn).show(|ui| {
                  ui.set_width(200.0);
                  ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -7870,7 +7902,7 @@ index 899a3c7..6c84282 100644
                      ui.add_space(4.0);
                      for (code, name) in super::lyric_prefs::LANGUAGES {
                          let on = app.lyric_prefs.target == *code;
-@@ -3418,6 +3768,51 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
+@@ -3418,6 +3791,51 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.page_blobs, "Blobs on pages");
          });
          divider(ui);
@@ -7922,7 +7954,7 @@ index 899a3c7..6c84282 100644
          setting_row(ui, "Colour icons to the song", Some("The marks — play, shuffle, repeat, the progress bar — take the sleeve's colour. Off keeps the app's own."), |ui| {
              toggle(ui, &mut app.icon_tint, "Colour icons to the song");
          });
-@@ -3426,10 +3821,6 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
+@@ -3426,10 +3844,6 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.disable_blur, "Power saver / Disable background blur");
          });
          divider(ui);
@@ -7933,7 +7965,7 @@ index 899a3c7..6c84282 100644
          setting_row(ui, "Font", Some("For the whole app and the lyrics. Any font installed on this PC works, e.g. one made for your language."), |ui| {
              if let Some(name) = font_picker(ui) {
                  theme::set_font_choice(&name);
-@@ -3456,7 +3847,7 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
+@@ -3456,7 +3870,7 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
  fn settings_player(app: &mut App, ui: &mut Ui) {
      section_label(ui, "Player appearance", None);
      settings_card(ui, |ui| {
@@ -7942,7 +7974,7 @@ index 899a3c7..6c84282 100644
              toggle(ui, &mut app.video_hd, "HD music videos");
          });
          divider(ui);
-@@ -3491,6 +3882,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3491,6 +3905,14 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.anim_bg, "Animated background");
          });
          divider(ui);
@@ -7957,7 +7989,7 @@ index 899a3c7..6c84282 100644
          setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
              toggle(ui, &mut app.reactive_bg, "Pulse with the music");
          });
-@@ -3499,7 +3898,6 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
+@@ -3499,7 +3921,6 @@ fn settings_player(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.show_nerd_stats, "Stats for nerds");
          });
      });
@@ -7965,7 +7997,7 @@ index 899a3c7..6c84282 100644
  }
  
  /// Settings › Window.
-@@ -3511,8 +3909,43 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
+@@ -3511,8 +3932,43 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
              toggle(ui, &mut app.close_to_tray, "Close to tray");
          });
          divider(ui);
@@ -8011,7 +8043,7 @@ index 899a3c7..6c84282 100644
          });
          divider(ui);
          let api = crate::renderer::api_name();
-@@ -3540,6 +3973,63 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
+@@ -3540,6 +3996,104 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
              }
          }
      });
@@ -8030,6 +8062,47 @@ index 899a3c7..6c84282 100644
 +}
 +
 +/// Settings › Storage: what the app saved on disk to go faster, and the way to clear it.
++/// Settings › Updates: the version running, a check on demand, and where the one in
++/// flight has got to. The app also looks by itself shortly after it opens and every six
++/// hours; a version it finds is downloaded and offered in a dialog with its notes.
++fn settings_updates(app: &mut App, ui: &mut Ui) {
++    use crate::update::State;
++    section_label(ui, "Updates", None);
++    let state = app.updater.as_ref().map_or(State::Idle, |u| u.state());
++    let running = crate::update::current_version();
++    let desc = match &state {
++        State::Idle => format!("Seven {running}. It looks for a newer version by itself after it opens, then every six hours."),
++        State::Checking => "Looking for a newer version…".to_owned(),
++        State::UpToDate => format!("You're on the latest version, Seven {running}."),
++        State::Downloading { version, percent } => format!("Downloading Seven {version}… {percent}%"),
++        State::Ready { version, .. } => format!("Seven {version} is downloaded. Restart the app to finish installing it."),
++        State::Failed(why) => format!("Couldn't check for updates: {why}"),
++    };
++    let (mut check, mut restart, mut notes) = (false, false, false);
++    settings_card(ui, |ui| {
++        setting_row(ui, "Check for updates", Some(desc.as_str()), |ui| match &state {
++            State::Ready { .. } => restart = pill(ui, "Restart to update", None, true).clicked(),
++            State::Checking | State::Downloading { .. } => {
++                ui.label(egui::RichText::new("Working…").font(theme::semibold(14.0)).color(theme::text_dim()));
++            }
++            _ => check = pill(ui, "Check now", None, false).clicked(),
++        });
++        divider(ui);
++        setting_row(ui, "What's new", Some("The release notes of the version you're running."), |ui| {
++            notes = pill(ui, "Read", None, false).clicked();
++        });
++    });
++    if check && let Some(u) = &app.updater {
++        u.check();
++    }
++    if restart {
++        app.restart_to_update(ui.ctx());
++    }
++    if notes {
++        app.notes_dialog = Some(super::notes::NotesDialog { version: running, ready: false });
++    }
++}
++
 +fn settings_storage(app: &mut App, ui: &mut Ui) {
 +    let ctx = ui.ctx().clone();
 +    let storage = app.storage.clone();
@@ -8075,7 +8148,7 @@ index 899a3c7..6c84282 100644
  }
  
  /// Settings › Connections.
-@@ -3593,8 +4083,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3593,8 +4147,8 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
                      });
                  });
                  divider(ui);
@@ -8086,7 +8159,7 @@ index 899a3c7..6c84282 100644
                  });
              }
          });
-@@ -3609,7 +4099,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
+@@ -3609,7 +4163,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
          let busy = app.lastfm_busy.load(Ordering::Relaxed);
          let desc = match &app.lastfm_user {
              Some(name) => format!("Scrobbling what you play to {name}'s profile."),
@@ -8095,7 +8168,7 @@ index 899a3c7..6c84282 100644
              None => "Scrobble what you play to your Last.fm profile.".to_owned(),
          };
          let (mut connect, mut disconnect) = (false, false);
-@@ -3722,7 +4212,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3722,7 +4276,7 @@ fn network(app: &mut App, ui: &mut Ui) {
      use crate::proxy::{self, Setting};
      let same = |a: &Setting, b: &Setting| std::mem::discriminant(a) == std::mem::discriminant(b);
      let mut pick = None;
@@ -8104,7 +8177,7 @@ index 899a3c7..6c84282 100644
          let btn = dropdown_button(ui, app.proxy_mode.label(), 220.0, "Proxy");
          egui::Popup::menu(&btn).show(|ui| {
              ui.set_width(220.0);
-@@ -3754,7 +4244,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3754,7 +4308,7 @@ fn network(app: &mut App, ui: &mut Ui) {
              divider(ui);
              let desc = match proxy::system() {
                  Some(p) => format!("Windows is set to use {}.", proxy::redact(&p)),
@@ -8113,7 +8186,7 @@ index 899a3c7..6c84282 100644
              };
              setting_row(ui, "Windows proxy", Some(&desc), |_| {});
          }
-@@ -3793,7 +4283,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3793,7 +4347,7 @@ fn network(app: &mut App, ui: &mut Ui) {
      let desc = match &result {
          Some(Some((_, msg))) => msg.clone(),
          Some(None) => "Checking…".to_owned(),
@@ -8122,7 +8195,7 @@ index 899a3c7..6c84282 100644
      };
      setting_row(ui, "Test connection", Some(&desc), |ui| {
          if matches!(result, Some(None)) {
-@@ -3807,7 +4297,7 @@ fn network(app: &mut App, ui: &mut Ui) {
+@@ -3807,7 +4361,7 @@ fn network(app: &mut App, ui: &mut Ui) {
              *slot.lock().unwrap() = Some(None);
              app.backend.spawn(async move {
                  let out = match proxy::test(&s).await {
@@ -8131,7 +8204,7 @@ index 899a3c7..6c84282 100644
                      Err(e) => (false, format!("Didn't connect: {e:#}")),
                  };
                  *slot.lock().unwrap() = Some(Some(out));
-@@ -3844,7 +4334,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
+@@ -3844,7 +4398,7 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
      egui::Popup::menu(&btn).show(|ui| {
          ui.set_width(220.0);
          ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -8140,7 +8213,7 @@ index 899a3c7..6c84282 100644
              ui.add_space(4.0);
              let mut row = |ui: &mut Ui, label: &str, value: &str| {
                  let on = current.eq_ignore_ascii_case(value);
-@@ -3889,25 +4379,30 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
+@@ -3889,25 +4443,30 @@ fn font_picker(ui: &mut Ui) -> Option<String> {
  
  const SYSTEM_DEFAULT: &str = "Windows default";
  
@@ -8177,7 +8250,7 @@ index 899a3c7..6c84282 100644
              ui.add_space(4.0);
              if option_row(ui, SYSTEM_DEFAULT, app.output_device.is_none()).clicked() {
                  pick = Some(None);
-@@ -3928,6 +4423,12 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
+@@ -3928,6 +4487,12 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
      }
  }
  
@@ -8190,7 +8263,7 @@ index 899a3c7..6c84282 100644
  /// A dropdown's closed state: the chosen value and a chevron on a glass pill.
  pub(super) fn dropdown_button(ui: &mut Ui, value: &str, width: f32, name: &str) -> egui::Response {
      let (rect, resp) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
-@@ -3993,15 +4494,61 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
+@@ -3993,15 +4558,62 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
      if !s.shown {
          return;
      }
@@ -8242,6 +8315,7 @@ index 899a3c7..6c84282 100644
 +        "Appearance" => icon::SPARKLES,
 +        "Player appearance" => icon::DISC_3,
 +        "Window" => icon::MAXIMIZE_2,
++        "Updates" => icon::DOWNLOAD,
 +        "Discord" | "Discord card" | "Last.fm" => icon::LINK,
 +        "Network" => icon::RADIO,
 +        "Import" => icon::UPLOAD,
@@ -9951,6 +10025,84 @@ index f44bea1..2d9ef81 100644
      if let Some(sub) = &sub {
          // An artist page's row links the release under its title; every other row links
          // the artists the line names.
+diff --git a/src/update.rs b/src/update.rs
+index d8f9163..c7c0b58 100644
+--- a/src/update.rs
++++ b/src/update.rs
+@@ -23,10 +23,12 @@
+ use std::path::{Path, PathBuf};
+ use std::sync::{Arc, Mutex};
+ 
+-const LATEST: &str = "https://api.github.com/repos/jackychan4891/BitChord-PC-Official/releases/latest";
+-const ALL_RELEASES: &str = "https://api.github.com/repos/jackychan4891/BitChord-PC-Official/releases";
+-const BY_TAG: &str = "https://api.github.com/repos/jackychan4891/BitChord-PC-Official/releases/tags/v";
+-pub const RELEASES: &str = "https://github.com/jackychan4891/BitChord-PC-Official/releases";
++// The placeholder in these addresses is this repository: the build replaces it with the
++// repository it runs in (see the workflow), so releases are read from where Seven is published.
++const LATEST: &str = "https://api.github.com/repos/OWNER/REPO/releases/latest";
++const ALL_RELEASES: &str = "https://api.github.com/repos/OWNER/REPO/releases";
++const BY_TAG: &str = "https://api.github.com/repos/OWNER/REPO/releases/tags/v";
++pub const RELEASES: &str = "https://github.com/OWNER/REPO/releases";
+ 
+ /// Release notes by version: `None` while fetching or when there are none.
+ type Notes = Arc<Mutex<std::collections::HashMap<String, Option<String>>>>;
+@@ -76,8 +78,19 @@ fn bundle_of(exe: &Path) -> Option<&Path> {
+     exe.ancestors().nth(3).filter(|a| a.extension().is_some_and(|x| x == "app"))
+ }
+ 
+-/// The release asset this copy updates from, as the BitChord releases name them.
++/// Seven's Windows build is an exe (and a loader dll) in a folder of its own, not an
++/// installed app: an update swaps the exe in place, the way the portable build does.
++/// Elsewhere only the portable build is replaced in place.
++pub fn in_place() -> bool {
++    cfg!(windows) || portable_dir().is_some()
++}
++
++/// The release asset this copy updates from: on Windows the zip the workflow publishes
++/// with every release, elsewhere the BitChord names.
+ fn asset_name(version: &str) -> String {
++    if cfg!(windows) {
++        return "Seven-windows.zip".to_owned();
++    }
+     let portable = portable_dir().is_some();
+     let arch = std::env::consts::ARCH;
+     if cfg!(target_os = "linux") {
+@@ -115,7 +128,7 @@ pub fn portable_dir() -> Option<PathBuf> {
+ 
+ /// Remove the exe a portable update replaced (it was still running then).
+ pub fn clean_portable() {
+-    if portable_dir().is_some()
++    if in_place()
+         && let Ok(exe) = std::env::current_exe()
+     {
+         let _ = std::fs::remove_file(exe.with_extension("exe.old"));
+@@ -255,7 +268,7 @@ impl Updater {
+             return Ok(State::UpToDate);
+         }
+         let version = tag.trim_start_matches('v').to_owned();
+-        let portable = portable_dir().is_some();
++        let portable = in_place();
+         let want = asset_name(&version);
+         // A release published before its installer was built: nothing to install
+         // yet, so this isn't an error. The next check picks it up.
+@@ -330,7 +343,7 @@ impl Updater {
+ 
+     #[cfg(windows)]
+     fn run_installer(&self, installer: &Path, exe: &Path, relaunch: bool) {
+-        if portable_dir().is_some() {
++        if in_place() {
+             return swap_exe(installer, exe, relaunch);
+         }
+         // Update the copy that's running: an all-users install lives under Program Files
+@@ -476,7 +489,7 @@ fn unzip_exe(zip: &Path, dir: &Path) -> anyhow::Result<PathBuf> {
+     }
+     let status = cmd.status()?;
+     #[cfg(windows)]
+-    let exe = dir.join("bitchord.exe");
++    let exe = dir.join("Seven.exe");
+     // Everything is in one top-level folder: the binary, or on macOS the app bundle.
+     #[cfg(not(windows))]
+     let exe = std::fs::read_dir(dir)?
 diff --git a/src/webmusic.rs b/src/webmusic.rs
 index c22c839..e131286 100644
 --- a/src/webmusic.rs
