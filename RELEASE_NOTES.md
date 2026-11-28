@@ -5,3 +5,4 @@
 - The playlists, albums, artists and songs pinned on the left rail can be **dragged to reorder**. Pick one up, drop it where you want it, and the order is kept.
 - Press **?** (or just the **/** key, no Shift needed) to see all the keyboard shortcuts on one glass card. It shows the keys you actually use, including any you changed.
 - When the internet comes back, **Home refreshes by itself**, and a page that failed to load during the outage loads again. The offline notice also has a **Retry** button.
+- Tap the version under the logo, or press **Check now** in Settings › Updates, and if you're already on the latest version, the small **Updated to** card with what's new in this version shows again in the corner.
