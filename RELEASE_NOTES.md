@@ -1,8 +1,6 @@
 ## What's new
 
-- The update dialog now shows a thin **progress bar** while a new version downloads, with the size next to it ("12 MB of 40 MB"). "Update available" under the logo also pulses gently, so it's easy to notice.
-- New **Version history** in Settings › Updates. One button shows the notes of the last few releases together, handy if you skipped some versions.
-- The playlists, albums, artists and songs pinned on the left rail can be **dragged to reorder**. Pick one up, drop it where you want it, and the order is kept.
-- Press **?** (or just the **/** key, no Shift needed) to see all the keyboard shortcuts on one glass card. It shows the keys you actually use, including any you changed.
-- When the internet comes back, **Home refreshes by itself**, and a page that failed to load during the outage loads again. The offline notice also has a **Retry** button.
-- Tap the version under the logo, or press **Check now** in Settings › Updates, and if you're already on the latest version, the small **Updated to** card with what's new in this version shows again in the corner.
+- **Carousel fix:** while the Home carousel slides (by itself or by hand), the hard box line along its bottom edge is gone. The card now fades into the page the same way it does when it's still.
+- **Lyrics and Up next stack again, like the original:** press **L** for the lyrics, then **Q** for Up next (or the other way round), and both stay open side by side. Neither closes the other any more, and the odd glitch when pressing Q with the lyrics open is gone. The two buttons on the player bar work the same way.
+- The side drawers (Lyrics, Up next) no longer smear their text across the page while they slide open or shut; their content now stays put at full width and is clipped to the drawer.
+- While the Home carousel changes slides, the picture now crossfades without dimming the whole card first.
